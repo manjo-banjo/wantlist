@@ -1,0 +1,188 @@
+# Want List App: Build Brief
+
+## 1. Purpose and constraints
+
+A shared want list for two people (Manoj and his partner), with room to add more later. It should do three things:
+
+- capture any item in seconds, from a screenshot or by typing;
+- show what everything costs;
+- plan what to buy and when, within a monthly budget.
+
+The product is the decision ("what do we buy next, and what slips if we don't"), not the list.
+
+**Success after 4 weeks**
+
+- Both users have added items from desktop and from iPhone.
+- Screenshot capture fills in name and price correctly for most items, and any fix takes under 10 seconds.
+- The planner has been used to decide at least one purchase.
+
+| Constraint | Rule |
+|---|---|
+| Cost | £0. No new accounts, no card. GitHub only |
+| Platform | Two repos. `wantlist` is public and holds the app code, served on GitHub Pages. `wantlist-data` is private and holds all lists, items and images. GitHub Actions reads screenshots |
+| Users | 2 at launch, each with their own passphrase. Adding a person means adding one entry to a file, with no code change |
+| Device | iPhone-first web app, added to the home screen. On desktop, add drag-and-drop and paste |
+| Privacy | No list data, images or plain-text secrets in the public repo, ever |
+| Maintenance | Nothing to renew or patch: the token never expires, there are no npm dependencies and no build step |
+| Build window | Phase 1 built with Fable before **Mon 17 Nov, 07:59 UK**. Phase 2 on Sonnet or Opus |
+
+## 2. How it works
+
+```
+iPhone / desktop browser
+   │
+   ▼
+GitHub Pages (public repo: wantlist): static app
+   │  passphrase unlocks a GitHub token stored encrypted in the app
+   ▼
+GitHub API ──read/write──► wantlist-data (private repo)
+                               │ a screenshot lands in inbox/
+                               ▼
+                         GitHub Action ──► GitHub Models (vision)
+                               │
+                               └─► writes items/<id>.json and the app picks it up
+```
+
+### Login
+
+- **Token.** One fine-grained personal access token. Repository access is limited to `wantlist-data`, with Contents set to read and write. It never expires. It never appears in plain text in either repo or in chat.
+- **Per-user entries.** `users.json` in the public repo holds one entry per person: their name, a salt, and the token encrypted with **AES-GCM**. The encryption key is derived from that person's passphrase using **PBKDF2-SHA256 with 600,000 iterations**.
+- **Adding a user.** `tools/add-user.html` produces a new entry. It runs entirely in the browser and sends nothing anywhere. It refuses passphrases shorter than 20 characters. Adding a person means running the tool and committing one entry.
+- **Unlocking.** The user enters their passphrase once per device. The derived key is kept as a **non-extractable CryptoKey in IndexedDB**, so the device stays signed in without the token sitting in readable storage. "Sign out" deletes the key.
+- **Attribution.** The signed-in user's name is stamped as `added_by` on every change.
+
+### Data (private repo: `wantlist-data`)
+
+```
+wantlist-data/
+  lists.json               # id, name, emoji, order, archived
+  settings.json            # monthly budget, currency (GBP), priority weights, rollover on/off
+  items/<id>.json          # one file per item
+  images/<id>.jpg          # compressed on the device: JPEG, longest edge 1280px, ~150 KB
+  inbox/<id>.jpg           # screenshots waiting to be read
+  inbox/<id>.meta.json     # list_id, added_by, optional note
+  prompts/extract.txt      # extraction prompt, tunable without touching code
+  .github/workflows/read-screenshot.yml
+```
+
+**Item fields:**
+
+| Group | Fields |
+|---|---|
+| Identity | `id`, `list_id`, `name`, `brand`, `retailer`, `url`, `variant` (size or colour) |
+| Price | `price_pence` (GBP), `orig_price` and `orig_currency` if the price is not in GBP, `was_price_pence`, `qty` |
+| Planning | `priority` (must / should / nice), `needed_by` (date or null), `status` (idea / considering / ready / bought / dropped), `notes` |
+| Purchase | `bought_at`, `bought_price_pence` |
+| Provenance | `image`, `source` (screenshot / manual), `ai_confidence` (per field), `added_by`, `created_at`, `updated_at` |
+| Phase 2 | `target_price_pence` (stored now, used later) |
+
+**Rules:**
+
+- **Writes** use the GitHub Contents API with the file's `sha`. On a conflict, refetch, reapply the change and retry. Because each item is its own file, two people only collide if they edit the same item at the same moment.
+- **Reads** use one GraphQL request that returns every item file. Results are cached in IndexedDB so the app opens instantly and can be read offline, and the cache refreshes in the background.
+- **History:** every change is a commit, so history and recovery come free. "Export" downloads everything as one JSON file.
+
+### Screenshot reading
+
+1. The app compresses the image on the device (JPEG, longest edge 1280px) and commits it to `inbox/` along with its meta file.
+2. The item appears straight away as a "Reading screenshot…" card. The user can keep adding.
+3. A push to `inbox/**` triggers the Action. It calls a **vision-capable GitHub Models model** using the built-in `GITHUB_TOKEN`, with `permissions: models: read, contents: write`. The model returns strict JSON, which is validated against the item schema.
+4. The Action writes `items/<id>.json`, moves the image to `images/` and clears the inbox entry. If one screenshot shows several products, it creates one item per product, up to 5.
+5. While any card is pending, the app polls every 10 seconds, for up to 3 minutes. Fields the model was unsure about are highlighted for review.
+
+**Target:** under 90 seconds from drop to filled card.
+
+**The model extracts:** name, brand, retailer, price and currency, was-price, variant, a URL if one is visible, and a confidence score for each field.
+
+**Fallback:** if GitHub Models will not accept images on the free tier, switch to Claude using a `CLAUDE_CODE_OAUTH_TOKEN` repo secret, the same fallback the news app uses. **Milestone 3 starts with a one-off test of image input before building anything else.**
+
+### Capture surfaces
+
+| Surface | How |
+|---|---|
+| Desktop | Drag and drop anywhere: dropping onto a list adds to that list, dropping elsewhere adds to the current list. Also Cmd/Ctrl+V to paste a screenshot, and multi-file drop |
+| iPhone | "Add" button opens the photo picker or camera, with multi-select |
+| Manual | Quick-add form: name, price and list are required; everything else is optional |
+
+## 3. Features by phase
+
+| Phase | Scope |
+|---|---|
+| **1 (Fable)** | **Lists:** create, rename, reorder, archive, give an emoji. **Items:** add, edit, move, change status; mark as bought with the actual price paid. **Screenshot capture** with a review step. **Views:** Lists, List, All items, Planner, Bought. **Totals** by list, priority and status, with the must-haves total shown prominently. **Planner** (section 4). **Login** for 2 users. **Export.** **Home-screen install**, readable offline |
+| **2** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. **Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret. **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
+| **3** | Alternatives within one item (option A/B/C). Gift lists by person and date. Capture via WhatsApp through the home box. More users |
+
+## 4. Prioritisation and planner
+
+**Score**
+
+- **Priority weight:** must = 3, should = 2, nice = 1. Editable in settings.
+- **Urgency:** needed-by within 30 days ×2; within 90 days ×1.5; otherwise, or no date, ×1.
+- **Score** = weight × urgency.
+- **Ties** go to the earlier needed-by date, then the cheaper item, then the older item.
+
+**Planner**
+
+- **Inputs:** a monthly budget, an optional one-off top-up for this month, rollover of unspent budget (on or off), and whether to include items still at the "idea" stage (off by default).
+- **Scheduling:** walk forward month by month. Fill each month with items in score order. If the next item doesn't fit, try smaller ones so gaps get used. An item that costs more than one month's budget is scheduled in the first month that accumulated rollover covers, and is shown as "saving for".
+- **Outputs:**
+  - **Month cards**, e.g. "Nov: £420 of £500, 4 items".
+  - **At-risk items:** anything whose planned month falls after its needed-by date, flagged in red.
+  - **Headline:** the minimum monthly budget that meets every needed-by date, found by binary search. For example: "At £500/month, 2 items miss their dates. £650/month hits them all."
+- **Behaviour:** the planner is a live view, not a commitment. It reshuffles automatically as items change.
+
+## 5. Front end
+
+Mobile-first and one-handed. Clean card layout with image thumbnails, light and dark mode, large tap targets. Prices display as £1,234.
+
+| Screen | Shows |
+|---|---|
+| Lists (home) | Each list with its item count, total and must-have total. A floating "Add" button |
+| List | Items sorted by score, with filters for status and priority. On desktop, the whole list is a drop zone |
+| Item sheet | All fields, the image, "Open link", "Mark bought" |
+| Planner | Budget input, the headline, month cards, at-risk items |
+| Settings | Budget, priority weights, signed-in user, sign out, export |
+
+## 6. Stack and repo layout
+
+| Layer | Choice |
+|---|---|
+| App | Static HTML, CSS and vanilla JavaScript. No framework, no npm, no build step |
+| Crypto | Web Crypto API (PBKDF2, AES-GCM) |
+| Local cache | IndexedDB |
+| Hosting | GitHub Pages, from the public `wantlist` repo |
+| Data | Private `wantlist-data` repo. Writes go through the REST Contents API; bulk reads through GraphQL |
+| AI | GitHub Models, called from Actions in `wantlist-data`. Claude token as the fallback |
+| Alerts (phase 2) | ntfy, using a new topic |
+
+```
+wantlist/                      (public)
+  index.html  app.js  styles.css  manifest.json  sw.js  icons/
+  js/  api.js  crypto.js  planner.js  capture.js  ui.js
+  users.json                   # encrypted per-user entries only
+  tools/add-user.html          # generates a users.json entry; runs offline
+  .github/workflows/pages.yml
+  README.md                    # setup, adding a user, rotating the token
+```
+
+## 7. Milestones
+
+Stop for review after each one.
+
+| # | Milestone | Done when |
+|---|---|---|
+| 1 | Skeleton, login, Pages deploy, add-user tool | Both passphrases unlock the app on iPhone |
+| 2 | Lists and items read/write against `wantlist-data`, with cache and conflict handling | An item added on desktop shows up on iPhone after a refresh |
+| 3 | Screenshot capture: image-input test first, then the Action, then the review UI | 5 screenshots from different retailers fill name and price correctly |
+| 4 | Score, planner and totals | The headline budget figure is correct on a hand-checked example |
+| 5 | Home-screen install, offline reading, export, README | Installed on both phones |
+
+## 8. Risks
+
+| Risk | Mitigation |
+|---|---|
+| The GitHub Models free tier won't accept images | Test first in milestone 3; fall back to the Claude token |
+| The encrypted token is public, so a passphrase could be guessed offline | Long passphrases are enforced and the key derivation is deliberately slow. The token can only touch one repo and can be revoked in one click |
+| GitHub Models rate limits | The free tier allows about 150 requests a day on smaller models, far above what two people will use |
+| Actions minutes on a private repo | About 1 minute per screenshot, against 2,000 free minutes a month |
+| Screenshot reading takes about a minute | A placeholder card appears at once, so the user can keep going |
