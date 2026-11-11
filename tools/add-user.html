@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- No network access of any kind: nothing typed here can leave this page. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Want List: add a user</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; }
+  .hint { font-weight: 400; color: GrayText; font-size: 14px; }
+  input { font: inherit; width: 100%; min-height: 44px; padding: 0 12px; box-sizing: border-box; }
+  button { font: inherit; min-height: 44px; padding: 0 18px; margin-top: 20px; cursor: pointer; }
+  pre { padding: 12px; border: 1px solid GrayText; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 13px; }
+  #error { color: #c62f2f; min-height: 1.4em; margin-top: 12px; }
+  #out[hidden] { display: none; }
+</style>
+</head>
+<body>
+<h1>Want List: add a user</h1>
+<p>Creates one encrypted entry for <code>users.json</code>. Everything happens on this page. It is blocked from making any network request, so the token and passphrase never leave this device.</p>
+
+<form id="form" autocomplete="off">
+  <label for="name">Name <span class="hint">shown in the app and stamped on changes; visible in the public repo</span></label>
+  <input id="name" required maxlength="40" autocomplete="off">
+
+  <label for="token">GitHub token <span class="hint">the fine-grained token for wantlist-data</span></label>
+  <input id="token" type="password" required autocomplete="off" spellcheck="false">
+
+  <label for="pass">Passphrase <span class="hint">at least 20 characters; four or five random words works well</span></label>
+  <input id="pass" type="password" required autocomplete="new-password">
+
+  <label for="pass2">Passphrase again</label>
+  <input id="pass2" type="password" required autocomplete="new-password">
+
+  <button type="submit" id="go">Create entry</button>
+  <p id="error" role="alert"></p>
+</form>
+
+<section id="out" hidden>
+  <h2>Entry for <span id="who"></span></h2>
+  <p>Add this inside the <code>[ ]</code> in <code>users.json</code> (comma between entries) and commit. It is safe to make public; the passphrase is not recoverable from it without guessing.</p>
+  <pre id="entry"></pre>
+  <button type="button" id="copy">Copy</button>
+</section>
+
+<script>
+'use strict';
+const ITERATIONS = 600000; // must match js/crypto.js
+const MIN_PASSPHRASE = 20;
+const te = new TextEncoder();
+const $ = (id) => document.getElementById(id);
+const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+
+async function deriveKey(passphrase, salt) {
+  const material = await crypto.subtle.importKey(
+    'raw', te.encode(passphrase.normalize('NFKC')), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: ITERATIONS },
+    material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  const token = $('token').value.trim();
+  const pass = $('pass').value;
+  $('out').hidden = true;
+  const fail = (msg) => { $('error').textContent = msg; };
+
+  if (!name) return fail('Enter a name.');
+  if (!token) return fail('Paste the GitHub token.');
+  if (/\s/.test(token)) return fail('The token contains a space or line break. Paste it again.');
+  if ([...pass].length < MIN_PASSPHRASE) return fail(`The passphrase must be at least ${MIN_PASSPHRASE} characters. This one has ${[...pass].length}.`);
+  if (pass !== $('pass2').value) return fail('The two passphrases don’t match.');
+  if (!window.crypto || !crypto.subtle) return fail('This browser won’t run the encryption here. Open the page in Safari or Chrome.');
+
+  fail('');
+  $('go').disabled = true;
+  $('go').textContent = 'Working…';
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(pass, salt);
+    const params = { name: 'AES-GCM', iv, additionalData: te.encode(name) };
+    const cipher = await crypto.subtle.encrypt(params, key, te.encode(token));
+    // Self-check: the entry must decrypt back to the token.
+    const back = new TextDecoder().decode(await crypto.subtle.decrypt(params, key, cipher));
+    if (back !== token) throw new Error('self-check failed');
+
+    const entry = { name, salt: b64(salt), iv: b64(iv), token: b64(cipher) };
+    $('who').textContent = name;
+    $('entry').textContent = JSON.stringify(entry, null, 2);
+    $('out').hidden = false;
+    $('token').value = $('pass').value = $('pass2').value = '';
+    $('out').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    fail('Something went wrong creating the entry: ' + err.message);
+  } finally {
+    $('go').disabled = false;
+    $('go').textContent = 'Create entry';
+  }
+});
+
+$('copy').addEventListener('click', async () => {
+  const text = $('entry').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const range = document.createRange();
+    range.selectNodeContents($('entry'));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    document.execCommand('copy');
+  }
+  $('copy').textContent = 'Copied';
+  setTimeout(() => { $('copy').textContent = 'Copy'; }, 1500);
+});
+</script>
+</body>
+</html>
