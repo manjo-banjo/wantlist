@@ -24,7 +24,7 @@ The product is the decision ("what do we buy next, and what slips if we don't"),
 | Device | iPhone-first web app, added to the home screen. On desktop, add drag-and-drop and paste |
 | Privacy | No list data, images or plain-text secrets in the public repo, ever |
 | Maintenance | Nothing to renew or patch: the token never expires, there are no npm dependencies and no build step |
-| Build window | Phase 1 built with Fable before **Mon 17 Nov, 07:59 UK**. Phase 2 on Sonnet or Opus |
+| Build | Fable-led throughout. Phase 1 was built with Fable and completed on 13 Nov 2026. Phases 2 and 3 are also built with Fable |
 
 ## 2. How it works
 
@@ -108,7 +108,7 @@ wantlist-data/
 
 | Phase | Scope |
 |---|---|
-| **1 (Fable)** | **Lists:** create, rename, reorder, archive, give an emoji. **Items:** add, edit, move, change status; mark as bought with the actual price paid. **Screenshot capture** with a review step. **Views:** Lists, List, All items, Planner, Bought. **Totals** by list, priority and status, with the must-haves total shown prominently. **Planner** (section 4). **Login** for 2 users. **Export.** **Home-screen install**, readable offline |
+| **1 (done)** | **Lists:** create, rename, reorder, archive, give an emoji. **Items:** add, edit, move, change status; mark as bought with the actual price paid. **Screenshot capture** with a review step. **Views:** Lists, List, All items, Planner, Bought. **Totals** by list, priority and status, with the must-haves total shown prominently. **Planner** (section 4). **Login** for 2 users. **Export.** **Home-screen install**, readable offline |
 | **2** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. **Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret. **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
 | **3** | Alternatives within one item (option A/B/C). Gift lists by person and date. Capture via WhatsApp through the home box. More users |
 
