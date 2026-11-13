@@ -201,3 +201,10 @@ body.dragging::after {
 /* An input with a small button beside it (Paste, on the link form). */
 .with-button { display: flex; gap: 8px; }
 .with-button input { flex: 1; min-width: 0; }
+
+/* Price checks. */
+.tag.price-down { color: var(--good); font-weight: 600; }
+.tag.price-up, .tag.check-failed { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.tag.checking { font-style: italic; }
+.list-tools { display: flex; justify-content: flex-end; }
+.list-tools button { min-height: 40px; font-size: 14px; padding: 6px 14px; }

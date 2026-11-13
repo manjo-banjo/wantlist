@@ -28,6 +28,9 @@ export function fmt(pence) {
   return '£' + Math.round(pence / 100).toLocaleString('en-GB');
 }
 
+// Exact amount with pence where there are any: £65.55, £12.
+const fmtExact = (pence) => (pence == null ? '–' : '£' + poundsInput(pence));
+
 // Exact amount for edit fields: 1234.5 -> "1234.50", 1200 -> "12".
 export function poundsInput(pence) {
   if (pence == null) return '';
@@ -116,6 +119,23 @@ export function chips(options, current, onPick, ariaLabel) {
 export const REVIEW_BELOW = 0.7;
 export const needsReview = (item) => (item.source === 'screenshot' || item.source === 'link') && !!item.ai_confidence;
 
+// Can this item's price be looked up? It needs a link and must still be wanted.
+export const canCheck = (item) => isActive(item) && /^https?:\/\//i.test(item.url || '');
+export const atTarget = (item) => isActive(item) && item.target_price_pence != null && item.price_pence != null && item.price_pence <= item.target_price_pence;
+
+// What the last price check found, as a short tag: [text, class] or null.
+function checkTag(item) {
+  const c = item.last_check;
+  if (!c || !isActive(item)) return null;
+  if (c.result === 'failed') return ['Price not found', 'tag check-failed'];
+  if (c.result !== 'changed' || c.from_pence == null || item.price_pence == null) return null;
+  const diff = item.price_pence - c.from_pence;
+  if (!diff) return null;
+  // Under a pound, show pence: whole pounds would read as "£0".
+  const amount = Math.abs(diff) < 100 ? `${Math.abs(diff)}p` : fmt(Math.abs(diff));
+  return diff < 0 ? [`↓ ${amount}`, 'tag price-down'] : [`↑ ${amount}`, 'tag price-up'];
+}
+
 // The CamelCamelCamel price-history page for an Amazon link, or null.
 const CAMEL_SITES = { 'co.uk': 'uk', com: 'www', de: 'de', fr: 'fr', it: 'it', es: 'es', ca: 'ca', 'com.au': 'au' };
 export function camelUrl(url) {
@@ -159,7 +179,8 @@ export function waitingCard(w, { list, showList, onRetry, onDiscard }) {
       : w.state !== 'slow' && el('span', { class: 'spinner', 'aria-hidden': 'true' }));
 }
 
-export function itemCard(item, { list, showList, onOpen, images }) {
+export function itemCard(item, { list, showList, onOpen, images, checking }) {
+  const check = checking ? ['Checking price…', 'tag checking'] : checkTag(item);
   const meta = [item.brand, item.retailer, item.variant].filter(Boolean).join(' · ');
   const bought = item.status === 'bought';
   const price = bought && item.bought_price_pence != null ? item.bought_price_pence : lineTotal(item);
@@ -170,6 +191,8 @@ export function itemCard(item, { list, showList, onOpen, images }) {
       meta && el('span', { class: 'item-meta' }, meta),
       el('span', { class: 'tags' },
         needsReview(item) && el('span', { class: 'tag review' }, 'Review'),
+        check && el('span', { class: check[1] }, check[0]),
+        atTarget(item) && el('span', { class: 'tag price-down' }, 'Target reached'),
         showList && list && el('span', { class: 'tag' }, list.name),
         !bought && el('span', { class: 'tag p-' + item.priority }, label(item.priority)),
         el('span', { class: 'tag' }, bought ? 'Bought ' + fmtDate(item.bought_at) : label(item.status)),
@@ -188,10 +211,22 @@ function select(name, options, value) {
   return el('select', { name }, options.map(([v, text]) => el('option', { value: v, selected: v === value }, text)));
 }
 
+// One sentence about the last price check, for the foot of the item sheet.
+function checkLine(item) {
+  const c = item.last_check;
+  if (!c) return '';
+  const when = fmtDate(c.at);
+  if (c.result === 'failed') return `. Price check on ${when} found no price (${(c.reason || 'unknown reason').replace(/\.$/, '')})`;
+  if (c.result === 'changed' && c.from_pence != null) return `. Price check on ${when}: was ${fmtExact(c.from_pence)}, now ${fmtExact(item.price_pence)}`;
+  if (c.result === 'changed') return `. Price check on ${when} found ${fmtExact(item.price_pence)}`;
+  return `. Price checked on ${when}: no change`;
+}
+
 // Add / edit form for an item.
 //   item: existing item or null. onSave(values) gets every field; onBought(pence) marks it bought.
 //   images: see thumb(). Fields the model was unsure about are highlighted until the item is saved.
-export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, images }) {
+//   onCheck() asks for a price check; `checking` is true while one is under way.
+export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, onCheck, checking, images }) {
   const review = item && needsReview(item);
   // Maps a form field to the model's confidence key.
   const unsure = (key) => review && !((item.ai_confidence[key] || 0) >= REVIEW_BELOW);
@@ -260,6 +295,8 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
         el('a', { class: 'button', href: item.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open link'),
       item && camelUrl(item.url) &&
         el('a', { class: 'button', href: camelUrl(item.url), target: '_blank', rel: 'noopener noreferrer' }, 'Price history'),
+      item && onCheck && canCheck(item) && el('button', { type: 'button', disabled: checking, onclick: onCheck },
+        checking ? 'Checking price…' : 'Check price'),
       item && item.status !== 'bought' && el('button', {
         type: 'button', onclick: () => { boughtRow.hidden = false; boughtRow.querySelector('input').select(); },
       }, 'Mark bought')));
@@ -286,7 +323,7 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
   }
   if (item) {
     form.append(el('p', { class: 'note wide' },
-      `Added by ${item.added_by || 'unknown'} on ${fmtDate(item.created_at)}` +
+      `Added by ${item.added_by || 'unknown'} on ${fmtDate(item.created_at)}` + checkLine(item) +
       (item.status === 'bought' && item.bought_at ? `. Bought ${fmtDate(item.bought_at)} for ${fmt(item.bought_price_pence)}` : '')));
   }
   return form;

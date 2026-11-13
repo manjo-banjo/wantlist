@@ -109,7 +109,7 @@ wantlist-data/
 | Phase | Scope |
 |---|---|
 | **1 (done)** | **Lists:** create, rename, reorder, archive, give an emoji. **Items:** add, edit, move, change status; mark as bought with the actual price paid. **Screenshot capture** with a review step. **Views:** Lists, List, All items, Planner, Bought. **Totals** by list, priority and status, with the must-haves total shown prominently. **Planner** (section 4). **Login** for 2 users. **Export.** **Home-screen install**, readable offline |
-| **2** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. **Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret. **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
+| **2** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. ~~**Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret.~~ Replaced by a **price check on request** (section 9). **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
 | **3** | Alternatives within one item (option A/B/C). Gift lists by person and date. Capture via WhatsApp through the home box. More users |
 
 ## 4. Prioritisation and planner
@@ -250,6 +250,21 @@ One-off test first, run from Actions on about a dozen machines, ending with thre
 | `source` | A third value, `link`. Link items are reviewed the same way as screenshot items |
 | Unreadable link | Becomes an item named after whatever title was found, or "Link to fill in", with the link attached and the fields flagged |
 | Not done | Setting a UK delivery postcode on Amazon to get its real price: it means replaying Amazon's form tokens, so it was left out. Reading from a UK machine (the home box) would give the true price and is the route to take if Camel prices prove too stale |
+
+### Phase 2: price check on request (built 13 Nov 2026)
+
+Replaces the brief's daily price check. The owner did not want a scheduled job using Claude allowance as lists grow.
+
+| Area | Decision |
+|---|---|
+| Trigger | A button, never a schedule. **Check price** on the sheet of any wanted item with a link; **Check N prices** on a list, which checks every wanted item with a link in that list whatever the filters show |
+| Transport | The app commits `inbox/<id>.meta.json` with `check: [item ids]`. The same "Read inbox" Action handles it. Up to 60 items per request |
+| Price source | The shop's JSON-LD or OpenGraph data; CamelCamelCamel for Amazon. Claude (Haiku) is asked only when a page loaded but had no price data, and its answer is used only at confidence 0.7 or above. Chosen by the owner |
+| Stale Camel prices | A Camel price dated before the item was created or last checked is ignored, so it can't overwrite a newer typed price |
+| Result | Recorded on the item in a new field `last_check: { at, result, from_pence, reason }`, with result `same`, `changed` or `failed`. A changed price updates `price_pence` at once and moves the old price to `was_price_pence`. Chosen by the owner |
+| Display | Card tags: "Checking price…", "↓ £6" or "↑ £6", "Price not found". The item sheet says what the last check found. Editing the price by hand clears `last_check` |
+| Target price | An item at or below its target shows "Target reached". No ntfy alert and no `NTFY_TOPIC` secret. Chosen by the owner |
+| Skipped | Items that are bought, dropped or have no link |
 
 ### How the work is done
 

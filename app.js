@@ -2,7 +2,7 @@ import { unlock, decryptToken, session } from './js/crypto.js';
 import { createStore, clearCache, DATA_REPO, PRIORITIES, STATUSES } from './js/api.js';
 import {
   el, mount, fmt, lineTotal, isActive, label, toast, sheet, chips, itemCard, itemForm, listForm,
-  waitingCard, addChooser, linkForm, listPicker, needsReview, fmtMonth, poundsInput, parsePounds,
+  waitingCard, addChooser, linkForm, listPicker, canCheck, needsReview, fmtMonth, poundsInput, parsePounds,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
 import { compare, todayString, plan, headline, totals } from './js/planner.js';
@@ -312,19 +312,25 @@ function itemsView(list) {
   // Items waiting for review come first so they are not missed.
   items.sort((a, b) => needsReview(b) - needsReview(a));
   const waiting = store.waiting().filter((w) => (list ? w.list_id === list.id : true));
+  const checking = store.checking();
+  // Every wanted item in this list that has a link, whatever the filters show.
+  const checkable = list ? store.items().filter((i) => i.list_id === list.id && canCheck(i)) : [];
 
   return el('div', { class: 'cards' },
     chips([['active', 'Active'], ['idea', 'Idea'], ['considering', 'Considering'], ['ready', 'Ready'],
       ['bought', 'Bought'], ['dropped', 'Dropped'], ['all', 'All']], f.status, setFilter('status'), 'Status'),
     chips([['all', 'Any priority'], ...PRIORITIES.map((p) => [p, label(p)])], f.priority, setFilter('priority'), 'Priority'),
     items.length > 0 && el('p', { class: 'note summary' }, `${items.length} ${items.length === 1 ? 'item' : 'items'} · ${fmt(total)}`),
+    list && checkable.length > 0 && el('div', { class: 'list-tools' },
+      el('button', { type: 'button', disabled: checkable.every((i) => checking.has(i.id)), onclick: () => checkPrices(checkable) },
+        checkable.every((i) => checking.has(i.id)) ? 'Checking prices…' : checkable.length === 1 ? 'Check 1 price' : `Check ${checkable.length} prices`)),
     waiting.map((w) => waitingCard(w, {
       list: byId.get(w.list_id), showList: !list,
       onRetry: (x) => save(store.retryScreenshot(x.id)),
       onDiscard: (x) => store.discardScreenshot(x.id),
     })),
     items.length
-      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images }))
+      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images, checking: checking.has(i.id) }))
       : !waiting.length && el('div', { class: 'empty' }, el('p', {},
         store.status === 'loading' ? 'Loading…' : scope ? 'Nothing matches these filters.' : 'Nothing here yet. Tap Add.')));
 }
@@ -420,6 +426,16 @@ function withBoughtFields(values, item) {
   return values;
 }
 
+// Asks for today's price of each item. The answer arrives in the background, like a screenshot.
+function checkPrices(items) {
+  const store = state.store;
+  const ids = items.filter(canCheck).map((i) => i.id);
+  if (!ids.length) return;
+  store.checkPrices(ids).then(
+    () => toast(ids.length === 1 ? 'Checking the price. It takes about a minute.' : `Checking ${ids.length} prices. It takes a minute or two.`),
+    () => toast(store.status === 'offline' ? 'You’re offline. Prices weren’t checked.' : 'The price check couldn’t be started. Try again.'));
+}
+
 function editItem(item) {
   const store = state.store;
   // Archived lists stay selectable only for an item that is already in one.
@@ -432,9 +448,12 @@ function editItem(item) {
       const patch = {};
       for (const [k, v] of Object.entries(all)) if (item[k] !== v) patch[k] = v;
       if (needsReview(item)) patch.ai_confidence = null; // saving is the review
+      if ('price_pence' in patch && item.last_check) patch.last_check = null; // a hand-set price replaces the check's finding
       if (Object.keys(patch).length) save(store.updateItem(item.id, patch));
       d.close();
     },
+    onCheck: () => { checkPrices([item]); d.close(); },
+    checking: store.checking().has(item.id),
     onBought: (pence) => {
       save(store.updateItem(item.id,
         { status: 'bought', bought_at: new Date().toISOString(), bought_price_pence: pence }, 'bought'));

@@ -52,6 +52,8 @@ Once opened online, the app also opens with no connection and shows the last syn
 |---|---|
 | Add from a screenshot | **+ Add → Screenshot or photo**. On desktop, drop images anywhere or paste. A card shows "Reading screenshot…" and fills in within about a minute |
 | Add from a link | **+ Add → Paste a link**. Paste a product link or an Amazon share link, type the price if you can see it, and pick a list. A card shows "Reading link…" and fills in within about a minute. No picture is kept; the item gets an emoji instead |
+| Check a price | Open an item that has a link and tap **Check price**, or tap **Check N prices** at the top of a list. Results arrive in a minute or two as tags: "↓ £6", "↑ £6" or "Price not found". A changed price is applied straight away and the old one is kept as the was-price |
+| Watch for a target | Set a **Target price** on the item. After a check, an item at or below it shows "Target reached" |
 | Check what was read | Items read from a screenshot or a link carry a **Review** tag. Fields the model was unsure about are highlighted; saving clears the tag |
 | Add by typing | **+ Add → Type it in**. Name, price and list are required |
 | Plan | **Planner**: set a monthly budget. Items are bought in score order (priority weight × urgency), month by month |
@@ -72,6 +74,8 @@ GitHub's machines are in the US, where Amazon shows either no price or a VAT-fre
 |---|---|
 | Type the price when pasting the link | That price |
 | Leave the price blank | CamelCamelCamel's latest price, flagged to check, with a note saying its date. Blank if Camel doesn't track the product |
+
+A price check on an Amazon item also uses CamelCamelCamel, and ignores a Camel price older than the one already on the item.
 
 An item with an Amazon link has a **Price history** button that opens its CamelCamelCamel page. Set price alerts there.
 
