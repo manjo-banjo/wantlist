@@ -1,34 +1,87 @@
 # Want List
 
-A shared want list. Static app on GitHub Pages; all data lives in the private `wantlist-data` repo. See [BRIEF.md](BRIEF.md).
+A shared want list for two people: capture an item from a screenshot or by typing, see what everything costs, and plan what to buy each month within a budget. The full specification is in [BRIEF.md](BRIEF.md).
+
+| Part | Where |
+|---|---|
+| App (this repo, public) | Static HTML, CSS and JavaScript on GitHub Pages. No framework, no npm, no build step |
+| Data (private) | `wantlist-data`: `lists.json`, `settings.json`, `items/`, `images/`, `inbox/` |
+| Screenshot reading | A GitHub Action in `wantlist-data` that asks Claude to read each image |
 
 No list data, images or plain-text secrets belong in this repo. `users.json` holds only encrypted entries.
 
 ## Setup (once)
 
-1. **Pages:** Settings → Pages → Source: **GitHub Actions**. Every push to `main` then deploys.
-2. **Token:** GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.
+1. **Pages.** In this repo: Settings → Pages → Source: **GitHub Actions**. Every push to `main` then deploys.
+2. **Data token.** GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.
    - Expiration: **No expiration**
-   - Repository access: **Only select repositories** → `wantlist-data`
-   - Permissions → Repository → **Contents: Read and write** (nothing else)
+   - Repository access: **Only select repositories** → `wantlist-data` (and nothing else)
+   - Permissions → Repository → **Contents: Read and write**
    - Keep the token on your clipboard only. Never paste it into a file, an issue or a chat.
-3. Add each user (below).
+3. **Users.** Add each person (see below).
+4. **Screenshot reading.** On your own computer run `claude setup-token`. In `wantlist-data`: Settings → Secrets and variables → Actions → New repository secret, named `CLAUDE_CODE_OAUTH_TOKEN`, with that value.
 
 ## Adding a user
 
-1. Open `tools/add-user.html` (on the Pages site at `/tools/add-user.html`, or download the file and open it; it works offline and is blocked from making network requests).
-2. Enter the person's name, the token, and a passphrase of at least 20 characters.
+1. Open `tools/add-user.html` on the Pages site, or download the file and open it. It works offline and is blocked from making network requests.
+2. Enter the person's name, the data token, and a passphrase of at least 20 characters.
 3. Copy the entry it produces into the `[ ]` in `users.json`, with a comma between entries, and commit to `main`.
-4. Once the deploy finishes, that person opens the app and enters their passphrase once per device.
+4. After the deploy, that person opens the app and enters their passphrase once per device.
 
-Removing a user: delete their entry and rotate the token, since they have already seen it decrypted.
+Names in `users.json` are public. To remove a user, delete their entry and rotate the token, since they have already seen it decrypted.
 
-## Rotating the token
+## Rotating the data token
 
 1. Revoke the old token on GitHub and generate a new one with the same settings.
-2. Re-run the add-user tool for every user with the new token (passphrases can stay the same).
+2. Re-run the add-user tool for every user with the new token. Passphrases can stay the same.
 3. Replace the entries in `users.json` and commit. Each device asks for the passphrase again.
+
+Changing which repositories an existing token can reach does not change its value, so no entries need redoing.
+
+## Installing on an iPhone
+
+1. Open the app in **Safari**.
+2. Tap Share → **Add to Home Screen**.
+3. Open it from the home screen and enter your passphrase. The installed app keeps its own sign-in, separate from Safari.
+
+Once opened online, the app also opens with no connection and shows the last synced lists, planner and any images already viewed. Changes need a connection; a change made offline is undone with a message.
+
+## Using it
+
+| To | Do |
+|---|---|
+| Add from a screenshot | **+ Add → Screenshot or photo**. On desktop, drop images anywhere or paste. A card shows "Reading screenshot…" and fills in within about a minute |
+| Check what was read | Items read from a screenshot carry a **Review** tag. Fields the model was unsure about are highlighted; saving clears the tag |
+| Add by typing | **+ Add → Type it in**. Name, price and list are required |
+| Plan | **Planner**: set a monthly budget. Items are bought in score order (priority weight × urgency), month by month |
+| Change weights or budget | **Settings** |
+| Back up | **Settings → Export everything** downloads all lists, items, settings and images as one JSON file |
+
+Every change is a commit in `wantlist-data`, with the person's name at the start of the message, so the history there is the audit trail and the undo.
 
 ## How login works
 
-Each entry holds a name, a random salt, an IV, and the token encrypted with AES-GCM. The key is derived from the passphrase with PBKDF2-SHA256, 600,000 iterations. After unlocking, the derived key is stored as a non-extractable CryptoKey in IndexedDB; the token itself is only ever held in memory. Sign out deletes the key.
+Each entry in `users.json` holds a name, a random salt, an IV, and the data token encrypted with AES-GCM. The key is derived from the passphrase with PBKDF2-SHA256, 600,000 iterations. After unlocking, the derived key is stored as a non-extractable CryptoKey in IndexedDB; the token itself is only ever held in memory. Sign out deletes the key and the cached list data.
+
+## Tuning screenshot reading
+
+- The prompt is `prompts/extract.txt` in `wantlist-data`. Edit it there; no code change is needed.
+- The model is set by `CLAUDE_MODEL` in `.github/workflows/read-screenshot.yml`.
+- If a card stays on "Reading screenshot…", open the Actions tab in `wantlist-data` and read the latest "Read screenshots" run.
+
+## Files
+
+```
+index.html  app.js  styles.css  manifest.json  sw.js  icons/
+js/  api.js      GitHub reads and writes, cache, the data store
+     crypto.js   passphrase unlock and the saved session
+     planner.js  score, planner and totals (pure functions)
+     capture.js  drag and drop, paste, photo picker, image compression
+     ui.js       formatting and shared screen pieces
+users.json                encrypted per-user entries
+tools/add-user.html       makes a users.json entry
+tools/planner-test.mjs    hand-checked planner example: node tools/planner-test.mjs
+.github/workflows/pages.yml
+```
+
+If you add a file to `js/`, add it to the list in `sw.js` too, or it won't be available offline.
