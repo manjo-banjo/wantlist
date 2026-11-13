@@ -47,6 +47,31 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Plan dates are month-level. They are stored in needed_by as the last day of the month.
+export function fmtMonth(dateOrKey) {
+  if (!dateOrKey) return '';
+  return new Date(+dateOrKey.slice(0, 4), +dateOrKey.slice(5, 7) - 1, 1)
+    .toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
+export function monthEnd(key) {
+  if (!key) return null;
+  const last = new Date(+key.slice(0, 4), +key.slice(5, 7), 0).getDate();
+  return `${key}-${String(last).padStart(2, '0')}`;
+}
+
+// [value, label] pairs: no date, then this month and the next 35 (plus `current` if outside that).
+function monthOptions(current) {
+  const now = new Date();
+  const keys = [];
+  for (let i = 0; i < 36; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  if (current && !keys.includes(current)) keys.unshift(current);
+  return [['', 'No date'], ...keys.map((k) => [k, fmtMonth(k)])];
+}
+
 export const lineTotal = (item) => (item.price_pence || 0) * (item.qty || 1);
 export const isActive = (item) => item.status !== 'bought' && item.status !== 'dropped';
 
@@ -138,7 +163,7 @@ export function itemCard(item, { list, showList, onOpen, images }) {
         showList && list && el('span', { class: 'tag' }, list.name),
         !bought && el('span', { class: 'tag p-' + item.priority }, label(item.priority)),
         el('span', { class: 'tag' }, bought ? 'Bought ' + fmtDate(item.bought_at) : label(item.status)),
-        !bought && item.needed_by && el('span', { class: 'tag' }, 'By ' + fmtDate(item.needed_by)))),
+        !bought && item.needed_by && el('span', { class: 'tag' }, fmtMonth(item.needed_by)))),
     el('span', { class: 'item-price' },
       el('span', {}, item.price_pence == null && !bought ? '–' : fmt(price)),
       !bought && item.qty > 1 && el('span', { class: 'item-meta' }, `${item.qty} × ${fmt(item.price_pence)}`)));
@@ -167,7 +192,7 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
 
   const more = [
     field('Quantity', text('qty', it.qty || 1, { type: 'number', min: '1', step: '1', inputmode: 'numeric' })),
-    field('Needed by', text('needed_by', it.needed_by, { type: 'date' })),
+    field('Plan for', select('needed_by', monthOptions(it.needed_by && it.needed_by.slice(0, 7)), it.needed_by ? it.needed_by.slice(0, 7) : '')),
     field('Priority', select('priority', priorities.map((p) => [p, label(p)]), it.priority)),
     field('Status', select('status', statuses.map((s) => [s, label(s)]), it.status)),
     field('Brand', text('brand', it.brand), { check: unsure('brand') && it.brand }),
@@ -189,7 +214,7 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
       const str = (v) => (v && v.trim() ? v.trim() : null);
       const values = {
         name: str(f.name), list_id: f.list_id, price_pence: parsePounds(f.price_pence),
-        qty: Math.max(1, parseInt(f.qty, 10) || 1), needed_by: f.needed_by || null,
+        qty: Math.max(1, parseInt(f.qty, 10) || 1), needed_by: monthEnd(f.needed_by),
         priority: f.priority, status: f.status,
         brand: str(f.brand), retailer: str(f.retailer), variant: str(f.variant),
         was_price_pence: parsePounds(f.was_price_pence), target_price_pence: parsePounds(f.target_price_pence),
