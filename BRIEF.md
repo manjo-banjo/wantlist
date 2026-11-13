@@ -227,12 +227,12 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 
 ### Phase 2: add from link (built 13 Nov 2026)
 
-One-off test first, run from Actions on ten machines with three real links from the owner.
+One-off test first, run from Actions on about a dozen machines, ending with three real links from the owner.
 
 | Finding | Detail |
 |---|---|
 | Share links | `amzn.eu/d/…` redirects to `/dp/<product id>`; reachable and never blocked |
-| Product page | The normal address (`/dp/`) returned a captcha 18 times in 19. The mobile address (`/gp/aw/d/<product id>`) returned the page 31 times in 31 |
+| Product page | The normal address (`/dp/`) returned a captcha 18 times in 19. The mobile address (`/gp/aw/d/<product id>`) returned the page every time, over 30 fetches |
 | Price | GitHub's machines are in the US. Amazon showed no price for two of three products ("cannot be dispatched to your selected delivery location") and a VAT-free price for the third (£19.74 against £23.69) |
 | Page data | Amazon pages carry no JSON-LD or OpenGraph data |
 | CamelCamelCamel | The product page loads when requested without a browser identity and gives a UK price, a few days old. Products it has never seen have none. Its chart image is blocked |
