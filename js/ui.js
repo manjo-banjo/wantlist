@@ -87,16 +87,54 @@ export function chips(options, current, onPick, ariaLabel) {
     }, text)));
 }
 
-export function itemCard(item, { list, showList, onOpen }) {
+// A fields "needs checking" if the model's confidence in it was below this.
+export const REVIEW_BELOW = 0.7;
+export const needsReview = (item) => item.source === 'screenshot' && !!item.ai_confidence;
+
+// Square thumbnail: the item's image if it has one, otherwise an emoji.
+// images = { now(path) -> url | null, load(path) -> Promise<url> }
+export function thumb(emoji, imagePath, images) {
+  const box = el('span', { class: 'thumb', 'aria-hidden': 'true' }, emoji);
+  if (imagePath && images) {
+    const show = (url) => mount(box, el('img', { src: url, alt: '' }));
+    const ready = images.now(imagePath);
+    if (ready) show(ready); else images.load(imagePath).then(show, () => {});
+  }
+  return box;
+}
+
+// Placeholder card for a screenshot that is uploading or being read.
+export function waitingCard(w, { list, showList, onRetry, onDiscard }) {
+  const text = {
+    uploading: 'Uploading…',
+    reading: 'Reading screenshot…',
+    slow: 'Still reading. This is taking longer than usual; tap ⟳ to check.',
+    failed: 'Upload failed.',
+  }[w.state];
+  const box = el('span', { class: 'thumb', 'aria-hidden': 'true' }, w.preview ? el('img', { src: w.preview, alt: '' }) : '📷');
+  return el('div', { class: 'item waiting ' + w.state },
+    box,
+    el('span', { class: 'item-main' },
+      el('span', { class: 'item-name' }, text),
+      showList && list && el('span', { class: 'tags' }, el('span', { class: 'tag' }, list.name))),
+    w.state === 'failed'
+      ? el('span', { class: 'row-tools' },
+        el('button', { type: 'button', onclick: () => onRetry(w) }, 'Retry'),
+        el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Discard', onclick: () => onDiscard(w) }, '✕'))
+      : w.state !== 'slow' && el('span', { class: 'spinner', 'aria-hidden': 'true' }));
+}
+
+export function itemCard(item, { list, showList, onOpen, images }) {
   const meta = [item.brand, item.retailer, item.variant].filter(Boolean).join(' · ');
   const bought = item.status === 'bought';
   const price = bought && item.bought_price_pence != null ? item.bought_price_pence : lineTotal(item);
   return el('button', { type: 'button', class: 'item', onclick: () => onOpen(item) },
-    el('span', { class: 'thumb', 'aria-hidden': 'true' }, (list && list.emoji) || '🛍️'),
+    thumb((list && list.emoji) || '🛍️', item.image, images),
     el('span', { class: 'item-main' },
       el('span', { class: 'item-name' }, item.name),
       meta && el('span', { class: 'item-meta' }, meta),
       el('span', { class: 'tags' },
+        needsReview(item) && el('span', { class: 'tag review' }, 'Review'),
         showList && list && el('span', { class: 'tag' }, list.name),
         !bought && el('span', { class: 'tag p-' + item.priority }, label(item.priority)),
         el('span', { class: 'tag' }, bought ? 'Bought ' + fmtDate(item.bought_at) : label(item.status)),
@@ -107,7 +145,8 @@ export function itemCard(item, { list, showList, onOpen }) {
 }
 
 function field(labelText, control, opts = {}) {
-  return el('label', { class: opts.wide ? 'field wide' : 'field' }, el('span', {}, labelText), control);
+  return el('label', { class: 'field' + (opts.wide ? ' wide' : '') + (opts.check ? ' check' : '') },
+    el('span', {}, labelText, opts.check && el('em', {}, ' · check')), control);
 }
 
 function select(name, options, value) {
@@ -116,7 +155,11 @@ function select(name, options, value) {
 
 // Add / edit form for an item.
 //   item: existing item or null. onSave(values) gets every field; onBought(pence) marks it bought.
-export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought }) {
+//   images: see thumb(). Fields the model was unsure about are highlighted until the item is saved.
+export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, images }) {
+  const review = item && needsReview(item);
+  // Maps a form field to the model's confidence key.
+  const unsure = (key) => review && !((item.ai_confidence[key] || 0) >= REVIEW_BELOW);
   const it = item || { qty: 1, priority: 'should', status: 'considering', list_id: listId };
   const text = (name, value, attrs = {}) => el('input', { name, value: value == null ? '' : value, autocomplete: 'off', ...attrs });
   const money = (name, pence, attrs = {}) => text(name, poundsInput(pence), { inputmode: 'decimal', placeholder: '0', ...attrs });
@@ -127,14 +170,14 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
     field('Needed by', text('needed_by', it.needed_by, { type: 'date' })),
     field('Priority', select('priority', priorities.map((p) => [p, label(p)]), it.priority)),
     field('Status', select('status', statuses.map((s) => [s, label(s)]), it.status)),
-    field('Brand', text('brand', it.brand)),
-    field('Retailer', text('retailer', it.retailer)),
-    field('Size or colour', text('variant', it.variant)),
-    field('Was price (£)', money('was_price_pence', it.was_price_pence)),
+    field('Brand', text('brand', it.brand), { check: unsure('brand') && it.brand }),
+    field('Retailer', text('retailer', it.retailer), { check: unsure('retailer') && it.retailer }),
+    field('Size or colour', text('variant', it.variant), { check: unsure('variant') && it.variant }),
+    field('Was price (£)', money('was_price_pence', it.was_price_pence), { check: unsure('was_price') && it.was_price_pence != null }),
     field('Target price (£)', money('target_price_pence', it.target_price_pence)),
     field('Original price', text('orig_price', it.orig_price, { inputmode: 'decimal', placeholder: 'If not in £' })),
     field('Original currency', text('orig_currency', it.orig_currency, { maxlength: '3', placeholder: 'EUR', autocapitalize: 'characters' })),
-    field('Link', text('url', it.url, { type: 'url', placeholder: 'https://' }), { wide: true }),
+    field('Link', text('url', it.url, { type: 'url', placeholder: 'https://' }), { wide: true, check: unsure('url') && it.url }),
     field('Notes', el('textarea', { name: 'notes', rows: '3' }, it.notes || ''), { wide: true }),
   ];
 
@@ -166,13 +209,15 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
       if (!problem) onSave(values);
     },
   },
-    field('Name', text('name', it.name, { required: true, enterkeyhint: 'next' }), { wide: true }),
-    field('Price (£)', money('price_pence', it.price_pence, { required: true })),
+    review && el('p', { class: 'note wide review-note' },
+      'Read from your screenshot. Check the highlighted fields, then save.'),
+    field('Name', text('name', it.name, { required: true, enterkeyhint: 'next' }), { wide: true, check: unsure('name') }),
+    field('Price (£)', money('price_pence', it.price_pence, { required: true }), { check: unsure('price') }),
     field('List', select('list_id', lists.map((l) => [l.id, `${l.emoji || ''} ${l.name}`.trim()]), it.list_id)),
     item ? more : el('details', { class: 'wide more' }, el('summary', {}, 'More details'), el('div', { class: 'form inner' }, more)),
     error,
     el('div', { class: 'actions wide' },
-      el('button', { type: 'submit', class: 'primary' }, item ? 'Save' : 'Add item'),
+      el('button', { type: 'submit', class: 'primary' }, review ? 'Looks right, save' : item ? 'Save' : 'Add item'),
       item && item.url && /^https?:\/\//i.test(item.url) &&
         el('a', { class: 'button', href: item.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open link'),
       item && item.status !== 'bought' && el('button', {
@@ -192,6 +237,13 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
     }, 'Confirm bought'));
   form.append(boughtRow);
 
+  if (item && item.image && images) {
+    const holder = el('div', { class: 'photo wide' });
+    form.prepend(holder);
+    const show = (url) => mount(holder, el('img', { src: url, alt: 'Screenshot for ' + item.name }));
+    const ready = images.now(item.image);
+    if (ready) show(ready); else images.load(item.image).then(show, () => holder.remove());
+  }
   if (item) {
     form.append(el('p', { class: 'note wide' },
       `Added by ${item.added_by || 'unknown'} on ${fmtDate(item.created_at)}` +
@@ -215,4 +267,20 @@ export function listForm({ list, onSave, onArchive }) {
     el('div', { class: 'actions wide' },
       el('button', { type: 'submit', class: 'primary' }, list ? 'Save' : 'Create list'),
       list && el('button', { type: 'button', class: 'danger', onclick: onArchive }, list.archived ? 'Unarchive' : 'Archive')));
+}
+
+// Two big choices shown by the Add button.
+export function addChooser({ onScreenshot, onManual }) {
+  return el('div', { class: 'chooser' },
+    el('button', { type: 'button', class: 'primary', onclick: onScreenshot },
+      el('span', { class: 'icon', 'aria-hidden': 'true' }, '📷'), 'Screenshot or photo'),
+    el('button', { type: 'button', onclick: onManual },
+      el('span', { class: 'icon', 'aria-hidden': 'true' }, '⌨️'), 'Type it in'));
+}
+
+export function listPicker(lists, onPick) {
+  return el('div', { class: 'cards' }, lists.map((l) =>
+    el('button', { type: 'button', class: 'item', onclick: () => onPick(l) },
+      el('span', { class: 'thumb', 'aria-hidden': 'true' }, l.emoji || '📋'),
+      el('span', { class: 'item-main' }, el('span', { class: 'item-name' }, l.name)))));
 }

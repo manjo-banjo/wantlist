@@ -2,7 +2,9 @@ import { unlock, decryptToken, session } from './js/crypto.js';
 import { createStore, clearCache, DATA_REPO, PRIORITIES, STATUSES } from './js/api.js';
 import {
   el, mount, fmt, lineTotal, isActive, label, toast, sheet, chips, itemCard, itemForm, listForm,
+  waitingCard, addChooser, listPicker, needsReview,
 } from './js/ui.js';
+import { compress, pickImages, initCapture } from './js/capture.js';
 
 const root = document.getElementById('app');
 
@@ -67,6 +69,11 @@ async function signOut() {
   location.hash = '';
   renderLogin();
 }
+
+// Thumbnails and photos come from the private repo through the store.
+const images = { now: (path) => state.store.imageNow(path), load: (path) => state.store.loadImage(path) };
+
+initCapture((files, listId) => { if (state.store) addScreenshots(files, listId); });
 
 window.addEventListener('hashchange', () => { if (state.store) render(); });
 document.addEventListener('visibilitychange', () => {
@@ -159,7 +166,7 @@ function render() {
   }[r.view]();
 
   const canAdd = ['lists', 'list', 'all'].includes(r.view);
-  const fab = canAdd && el('button', { class: 'fab primary', onclick: () => addItem(list) }, '+ Add');
+  const fab = canAdd && el('button', { class: 'fab primary', onclick: () => add(list) }, '+ Add');
 
   const nav = el('nav', { class: 'tabs' }, TABS.map((t) =>
     el('a', {
@@ -190,6 +197,7 @@ function listStats(listId) {
     count: items.length,
     total: items.reduce((sum, i) => sum + lineTotal(i), 0),
     must: items.filter((i) => i.priority === 'must').reduce((sum, i) => sum + lineTotal(i), 0),
+    waiting: state.store.waiting().filter((w) => w.list_id === listId).length,
   };
 }
 
@@ -212,10 +220,11 @@ function listsView(lists) {
       el('span', { class: 'thumb', 'aria-hidden': 'true' }, l.emoji || '📋'),
       el('span', { class: 'item-main' },
         el('span', { class: 'item-name' }, l.name),
-        el('span', { class: 'item-meta' }, `${s.count} ${s.count === 1 ? 'item' : 'items'}` + (s.must ? ` · must-haves ${fmt(s.must)}` : ''))),
+        el('span', { class: 'item-meta' }, `${s.count} ${s.count === 1 ? 'item' : 'items'}`
+          + (s.must ? ` · must-haves ${fmt(s.must)}` : '') + (s.waiting ? ` · reading ${s.waiting}` : ''))),
     ];
     if (!state.editingLists) {
-      return el('a', { class: 'item', href: '#/list/' + l.id }, summary, el('span', { class: 'item-price' }, fmt(s.total)));
+      return el('a', { class: 'item', href: '#/list/' + l.id, 'data-list-id': l.id }, summary, el('span', { class: 'item-price' }, fmt(s.total)));
     }
     return el('div', { class: 'item' }, summary,
       el('span', { class: 'row-tools' },
@@ -282,15 +291,23 @@ function itemsView(list) {
     .filter((i) => f.priority === 'all' || i.priority === f.priority)
     .sort(byPriority);
   const total = items.filter(isActive).reduce((sum, i) => sum + lineTotal(i), 0);
+  // Items waiting for review come first so they are not missed.
+  items.sort((a, b) => needsReview(b) - needsReview(a));
+  const waiting = store.waiting().filter((w) => (list ? w.list_id === list.id : true));
 
   return el('div', { class: 'cards' },
     chips([['active', 'Active'], ['idea', 'Idea'], ['considering', 'Considering'], ['ready', 'Ready'],
       ['bought', 'Bought'], ['dropped', 'Dropped'], ['all', 'All']], f.status, setFilter('status'), 'Status'),
     chips([['all', 'Any priority'], ...PRIORITIES.map((p) => [p, label(p)])], f.priority, setFilter('priority'), 'Priority'),
     items.length > 0 && el('p', { class: 'note summary' }, `${items.length} ${items.length === 1 ? 'item' : 'items'} · ${fmt(total)}`),
+    waiting.map((w) => waitingCard(w, {
+      list: byId.get(w.list_id), showList: !list,
+      onRetry: (x) => save(store.retryScreenshot(x.id)),
+      onDiscard: (x) => store.discardScreenshot(x.id),
+    })),
     items.length
-      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem }))
-      : el('div', { class: 'empty' }, el('p', {},
+      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images }))
+      : !waiting.length && el('div', { class: 'empty' }, el('p', {},
         store.status === 'loading' ? 'Loading…' : scope ? 'Nothing matches these filters.' : 'Nothing here yet. Tap Add.')));
 }
 
@@ -305,7 +322,44 @@ function boughtView() {
   }
   return el('div', { class: 'cards' },
     el('p', { class: 'note summary' }, `${items.length} bought · ${fmt(spent)} spent`),
-    items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: true, onOpen: editItem })));
+    items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: true, onOpen: editItem, images })));
+}
+
+// The Add button: screenshot/photo or type it in.
+function add(list) {
+  const lists = state.store.lists().filter((l) => !l.archived);
+  if (!lists.length) { toast('Create a list first.'); return editList(null); }
+  const d = sheet('Add', addChooser({
+    onScreenshot: async () => {
+      const files = await pickImages(); // must be called straight from the tap
+      d.close();
+      if (files.length) addScreenshots(files, list ? list.id : null);
+    },
+    onManual: () => { d.close(); addItem(list); },
+  }));
+}
+
+// Compresses and uploads screenshots. listId: where they were dropped, or null.
+function addScreenshots(files, listId) {
+  const store = state.store;
+  const lists = store.lists().filter((l) => !l.archived);
+  if (!lists.length) { toast('Create a list first.'); return editList(null); }
+  const r = route();
+  const target = listId || (r.view === 'list' && lists.some((l) => l.id === r.id) ? r.id : null);
+
+  const send = async (id) => {
+    for (const file of files) {
+      let blob;
+      try { blob = await compress(file); } catch (e) { toast(`“${file.name || 'That image'}” couldn’t be opened as an image.`); continue; }
+      store.addScreenshot(blob, id).catch(() => toast(
+        store.status === 'offline' ? 'You’re offline. Tap Retry on the card when you’re back.' : 'A screenshot couldn’t be uploaded. Tap Retry on the card.'));
+    }
+  };
+  if (target) return send(target);
+  if (lists.length === 1) return send(lists[0].id);
+  // No list is open: ask which one.
+  const d = sheet(files.length === 1 ? 'Add screenshot to…' : `Add ${files.length} screenshots to…`,
+    listPicker(lists, (l) => { d.close(); send(l.id); }));
 }
 
 function addItem(list) {
@@ -337,12 +391,13 @@ function editItem(item) {
   // Archived lists stay selectable only for an item that is already in one.
   const lists = store.lists().filter((l) => !l.archived || l.id === item.list_id);
   const d = sheet('Item', itemForm({
-    item, lists, priorities: PRIORITIES, statuses: STATUSES,
+    item, lists, priorities: PRIORITIES, statuses: STATUSES, images,
     onSave: (values) => {
       // Send only the fields that changed, so a simultaneous edit to other fields survives.
       const all = withBoughtFields(values, item);
       const patch = {};
       for (const [k, v] of Object.entries(all)) if (item[k] !== v) patch[k] = v;
+      if (needsReview(item)) patch.ai_confidence = null; // saving is the review
       if (Object.keys(patch).length) save(store.updateItem(item.id, patch));
       d.close();
     },

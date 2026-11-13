@@ -56,16 +56,25 @@ function github(token) {
     },
 
     // Creates (no sha) or updates (with sha) a file. Returns the new sha.
-    async put(path, data, sha, message) {
+    put(path, data, sha, message) {
+      return this.putBase64(path, b64encode(JSON.stringify(data, null, 2) + '\n'), sha, message);
+    },
+
+    async putBase64(path, content, sha, message) {
       const res = await fetch(url(path), {
         method: 'PUT', headers,
-        body: JSON.stringify({
-          message, content: b64encode(JSON.stringify(data, null, 2) + '\n'), ...(sha ? { sha } : {}),
-        }),
+        body: JSON.stringify({ message, content, ...(sha ? { sha } : {}) }),
       });
       if (res.status === 409 || res.status === 422) throw new Conflict();
       if (!res.ok) throw new HttpError(res.status);
       return (await res.json()).content.sha;
+    },
+
+    // Downloads a file's bytes (images are private, so they cannot be loaded by URL).
+    async getBlob(path) {
+      const res = await fetch(url(path), { headers: { ...headers, Accept: 'application/vnd.github.raw' } });
+      if (!res.ok) throw new HttpError(res.status);
+      return res.blob();
     },
   };
 }
@@ -76,6 +85,9 @@ query($owner: String!, $name: String!) {
     lists: object(expression: "HEAD:lists.json") { ... on Blob { oid text } }
     settings: object(expression: "HEAD:settings.json") { ... on Blob { oid text } }
     items: object(expression: "HEAD:items") {
+      ... on Tree { entries { name oid object { ... on Blob { text } } } }
+    }
+    inbox: object(expression: "HEAD:inbox") {
       ... on Tree { entries { name oid object { ... on Blob { text } } } }
     }
   }
@@ -100,6 +112,9 @@ function cacheTx(mode, fn) {
   });
 }
 
+const cacheGet = (key) => cacheTx('readonly', (s) => s.get(key)).catch(() => undefined);
+const cachePut = (key, value) => cacheTx('readwrite', (s) => s.put(value, key)).catch(() => {});
+
 export function clearCache() {
   return cacheTx('readwrite', (s) => s.clear()).catch(() => {});
 }
@@ -116,6 +131,20 @@ function newId() {
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const itemPath = (id) => `items/${id}.json`;
+const metaPath = (id) => `inbox/${id}.meta.json`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const POLL_MS = 10000;          // while a screenshot is being read, check every 10 seconds...
+const POLL_FOR_MS = 3 * 60000;  // ...for up to 3 minutes
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.slice(reader.result.indexOf(',') + 1));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
 
 // status: 'loading' | 'syncing' | 'ok' | 'offline' | 'denied' | 'error'
 export function createStore({ token, user, onChange }) {
@@ -125,6 +154,9 @@ export function createStore({ token, user, onChange }) {
   let pending = 0;         // writes queued or in flight
   let queue = Promise.resolve();
   let refreshing = null;
+  const uploads = new Map();   // id -> { id, list_id, state: 'uploading' | 'failed' | 'reading', preview, blob }
+  const firstSeen = new Map(); // id -> when this device first saw the screenshot waiting
+  const imageUrls = new Map(); // path -> object URL (ready) or Promise (loading)
 
   const emit = () => onChange();
   const saveCache = () => cacheTx('readwrite', (s) => s.put([...files], 'files')).catch(() => {});
@@ -174,10 +206,10 @@ export function createStore({ token, user, onChange }) {
     return result;
   }
 
-  async function refresh() {
+  async function refresh({ quiet = false } = {}) {
     if (refreshing) return refreshing;
     refreshing = (async () => {
-      if (status !== 'loading') status = 'syncing';
+      if (status !== 'loading' && !quiet) status = 'syncing';
       emit();
       try {
         let repo;
@@ -200,16 +232,105 @@ export function createStore({ token, user, onChange }) {
             files.set(`items/${e.name}`, { data: JSON.parse(e.object.text), sha: e.oid });
           } catch (err) { /* skip a malformed file rather than lose the whole list */ }
         }
+        for (const e of (repo.inbox && repo.inbox.entries) || []) {
+          if (!e.name.endsWith('.meta.json') || !e.object || e.object.text == null) continue;
+          try {
+            files.set(`inbox/${e.name}`, { data: JSON.parse(e.object.text), sha: e.oid });
+          } catch (err) { /* ignore */ }
+        }
+        // A screenshot this device uploaded has been read once its inbox entry is gone.
+        for (const [id, up] of uploads) {
+          if (up.state !== 'reading' || files.has(metaPath(id))) continue;
+          const item = (files.get(itemPath(id)) || {}).data;
+          if (item && item.image && !imageUrls.has(item.image)) {
+            imageUrls.set(item.image, up.preview); // reuse the local copy instead of downloading it
+            cachePut('img:' + item.image, up.blob);
+          }
+          uploads.delete(id);
+        }
         status = 'ok';
         saveCache();
+        watchInbox();
       } catch (err) {
-        status = statusFor(err);
+        if (!quiet || status === 'loading') status = statusFor(err);
       } finally {
         refreshing = null;
         emit();
       }
     })();
     return refreshing;
+  }
+
+  // ---- screenshots ----
+
+  function waiting() {
+    const out = [];
+    for (const up of uploads.values()) if (up.state !== 'reading') out.push(up);
+    for (const [path, f] of files) {
+      if (!path.startsWith('inbox/') || !path.endsWith('.meta.json')) continue;
+      const id = path.slice('inbox/'.length, -'.meta.json'.length);
+      if (!firstSeen.has(id)) firstSeen.set(id, Date.now());
+      const up = uploads.get(id);
+      out.push({
+        id, list_id: f.data.list_id, added_by: f.data.added_by, preview: up && up.preview,
+        state: Date.now() - firstSeen.get(id) > POLL_FOR_MS ? 'slow' : 'reading',
+      });
+    }
+    return out;
+  }
+
+  let pollTimer = null;
+  function watchInbox() {
+    const reading = waiting().some((w) => w.state === 'reading');
+    if (reading && !pollTimer) {
+      pollTimer = setInterval(() => {
+        if (!waiting().some((w) => w.state === 'reading')) { clearInterval(pollTimer); pollTimer = null; emit(); return; }
+        if (document.visibilityState === 'visible') refresh({ quiet: true });
+      }, POLL_MS);
+    }
+  }
+
+  // Retries a create that lost a race with another push to the branch.
+  async function create(fn) {
+    for (let attempt = 1; ; attempt++) {
+      try { return await fn(); } catch (err) {
+        if (!(err instanceof Conflict) || attempt >= MAX_ATTEMPTS) throw err;
+        await sleep(400 * attempt);
+      }
+    }
+  }
+
+  // Commits the image, then its meta file (the meta file is what starts the reader).
+  function sendScreenshot(up) {
+    up.state = 'uploading';
+    pending++;
+    emit();
+    const run = async () => {
+      try {
+        if (!up.imageSent) {
+          const content = await blobToBase64(up.blob);
+          await create(() => gh.putBase64(`inbox/${up.id}.jpg`, content, null, `${user}: add screenshot`));
+          up.imageSent = true;
+        }
+        const meta = { list_id: up.list_id, added_by: user, note: null };
+        const sha = await create(() => gh.put(metaPath(up.id), meta, null, `${user}: add screenshot`));
+        files.set(metaPath(up.id), { data: meta, sha });
+        up.state = 'reading';
+        status = 'ok';
+        watchInbox();
+      } catch (err) {
+        up.state = 'failed';
+        status = err instanceof Conflict ? 'error' : statusFor(err);
+        throw err;
+      } finally {
+        pending--;
+        saveCache();
+        emit();
+      }
+    };
+    const result = queue.then(run);
+    queue = result.catch(() => {});
+    return result;
   }
 
   const lists = () => ((files.get('lists.json') || {}).data || []).slice().sort((a, b) => a.order - b.order);
@@ -225,6 +346,42 @@ export function createStore({ token, user, onChange }) {
       return out;
     },
     item: (id) => (files.get(itemPath(id)) || {}).data || null,
+
+    // Screenshots that are uploading, being read, or failed to upload.
+    waiting,
+    addScreenshot(blob, listId) {
+      const up = { id: newId(), list_id: listId, blob, preview: URL.createObjectURL(blob), state: 'uploading' };
+      uploads.set(up.id, up);
+      return sendScreenshot(up);
+    },
+    retryScreenshot(id) {
+      const up = uploads.get(id);
+      return up && up.state === 'failed' ? sendScreenshot(up) : Promise.resolve();
+    },
+    discardScreenshot(id) {
+      uploads.delete(id);
+      emit();
+    },
+
+    // Images: imageNow() returns a URL if the image is already loaded, loadImage() fetches it.
+    imageNow: (path) => (typeof imageUrls.get(path) === 'string' ? imageUrls.get(path) : null),
+    loadImage(path) {
+      const have = imageUrls.get(path);
+      if (have) return Promise.resolve(have);
+      const loading = (async () => {
+        let blob = await cacheGet('img:' + path);
+        if (!blob) {
+          blob = await gh.getBlob(path);
+          cachePut('img:' + path, blob);
+        }
+        const url = URL.createObjectURL(blob);
+        imageUrls.set(path, url);
+        return url;
+      })();
+      imageUrls.set(path, loading);
+      loading.catch(() => imageUrls.delete(path));
+      return loading;
+    },
 
     // Shows cached data at once, then refreshes in the background.
     async init() {
