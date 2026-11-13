@@ -507,6 +507,51 @@ function plannerView() {
       p.unpriced.map((i) => row(i, 'add a price'))));
 }
 
+// ---- export ----
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function exportAll(button) {
+  const store = state.store;
+  const items = store.items();
+  const paths = [...new Set(items.map((i) => i.image).filter(Boolean))];
+  const images = {};
+  const missing = [];
+  button.disabled = true;
+  try {
+    for (let n = 0; n < paths.length; n++) {
+      button.textContent = `Collecting images ${n + 1} of ${paths.length}…`;
+      try {
+        const url = await store.loadImage(paths[n]);
+        images[paths[n]] = await blobToDataUrl(await (await fetch(url)).blob());
+      } catch (e) { missing.push(paths[n]); }
+    }
+    const data = {
+      app: 'wantlist', version: 1, exported_at: new Date().toISOString(), exported_by: state.user,
+      lists: store.lists(), settings: store.settings(), items, images, images_missing: missing,
+    };
+    const link = el('a', {
+      href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })),
+      download: `wantlist-export-${todayString()}.json`,
+    });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    if (missing.length) toast(`Exported, but ${missing.length} ${missing.length === 1 ? 'image' : 'images'} couldn’t be fetched.`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Export everything';
+  }
+}
+
 // ---- settings ----
 
 function settingsView() {
@@ -548,7 +593,12 @@ function settingsView() {
       el('div', { class: 'form three' }, PRIORITIES.map(weight))),
     el('section', { class: 'card' },
       el('h2', {}, 'Export'),
-      el('p', { class: 'note' }, 'Arrives in milestone 5.')));
+      el('p', { class: 'note' }, 'Downloads every list, item, setting and image as one JSON file.'),
+      el('button', { onclick: (e) => exportAll(e.currentTarget) }, 'Export everything')));
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* the app still works online without it */ });
 }
 
 start();
