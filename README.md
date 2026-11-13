@@ -1,12 +1,12 @@
 # Want List
 
-A shared want list for two people: capture an item from a screenshot or by typing, see what everything costs, and plan what to buy each month within a budget. The full specification is in [BRIEF.md](BRIEF.md).
+A shared want list for two people: capture an item from a screenshot, a link or by typing, see what everything costs, and plan what to buy each month within a budget. The full specification is in [BRIEF.md](BRIEF.md).
 
 | Part | Where |
 |---|---|
 | App (this repo, public) | Static HTML, CSS and JavaScript on GitHub Pages. No framework, no npm, no build step |
 | Data (private) | `wantlist-data`: `lists.json`, `settings.json`, `items/`, `images/`, `inbox/` |
-| Screenshot reading | A GitHub Action in `wantlist-data` that asks Claude to read each image |
+| Screenshot and link reading | A GitHub Action in `wantlist-data` that asks Claude to read each image or web page |
 
 No list data, images or plain-text secrets belong in this repo. `users.json` holds only encrypted entries.
 
@@ -51,7 +51,8 @@ Once opened online, the app also opens with no connection and shows the last syn
 | To | Do |
 |---|---|
 | Add from a screenshot | **+ Add → Screenshot or photo**. On desktop, drop images anywhere or paste. A card shows "Reading screenshot…" and fills in within about a minute |
-| Check what was read | Items read from a screenshot carry a **Review** tag. Fields the model was unsure about are highlighted; saving clears the tag |
+| Add from a link | **+ Add → Paste a link**. Paste a product link or an Amazon share link, type the price if you can see it, and pick a list. A card shows "Reading link…" and fills in within about a minute. No picture is kept; the item gets an emoji instead |
+| Check what was read | Items read from a screenshot or a link carry a **Review** tag. Fields the model was unsure about are highlighted; saving clears the tag |
 | Add by typing | **+ Add → Type it in**. Name, price and list are required |
 | Plan | **Planner**: set a monthly budget. Items are bought in score order (priority weight × urgency), month by month |
 | Change weights or budget | **Settings** |
@@ -63,11 +64,22 @@ Every change is a commit in `wantlist-data`, with the person's name at the start
 
 Each entry in `users.json` holds a name, a random salt, an IV, and the data token encrypted with AES-GCM. The key is derived from the passphrase with PBKDF2-SHA256, 600,000 iterations. After unlocking, the derived key is stored as a non-extractable CryptoKey in IndexedDB; the token itself is only ever held in memory. Sign out deletes the key and the cached list data.
 
-## Tuning screenshot reading
+## Amazon links and prices
 
-- The prompt is `prompts/extract.txt` in `wantlist-data`. Edit it there; no code change is needed.
+GitHub's machines are in the US, where Amazon shows either no price or a VAT-free one, so the price is never read from Amazon.
+
+| You do | The item gets |
+|---|---|
+| Type the price when pasting the link | That price |
+| Leave the price blank | CamelCamelCamel's latest price, flagged to check, with a note saying its date. Blank if Camel doesn't track the product |
+
+An item with an Amazon link has a **Price history** button that opens its CamelCamelCamel page. Set price alerts there.
+
+## Tuning screenshot and link reading
+
+- The prompts are `prompts/extract.txt` (screenshots) and `prompts/extract-link.txt` (links) in `wantlist-data`. Edit them there; no code change is needed.
 - The model is set by `CLAUDE_MODEL` in `.github/workflows/read-screenshot.yml`.
-- If a card stays on "Reading screenshot…", open the Actions tab in `wantlist-data` and read the latest "Read screenshots" run.
+- If a card stays on "Reading screenshot…" or "Reading link…", open the Actions tab in `wantlist-data` and read the latest "Read inbox" run.
 
 ## Files
 

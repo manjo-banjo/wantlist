@@ -114,7 +114,14 @@ export function chips(options, current, onPick, ariaLabel) {
 
 // A fields "needs checking" if the model's confidence in it was below this.
 export const REVIEW_BELOW = 0.7;
-export const needsReview = (item) => item.source === 'screenshot' && !!item.ai_confidence;
+export const needsReview = (item) => (item.source === 'screenshot' || item.source === 'link') && !!item.ai_confidence;
+
+// The CamelCamelCamel price-history page for an Amazon link, or null.
+const CAMEL_SITES = { 'co.uk': 'uk', com: 'www', de: 'de', fr: 'fr', it: 'it', es: 'es', ca: 'ca', 'com.au': 'au' };
+export function camelUrl(url) {
+  const m = /^https?:\/\/(?:[\w-]+\.)*amazon\.(co\.uk|com\.au|com|de|fr|it|es|ca)\/(?:.*\/)?(?:dp|gp\/aw\/d|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i.exec(url || '');
+  return m ? `https://${CAMEL_SITES[m[1].toLowerCase()]}.camelcamelcamel.com/product/${m[2].toUpperCase()}` : null;
+}
 
 // Square thumbnail: the item's image if it has one, otherwise an emoji.
 // images = { now(path) -> url | null, load(path) -> Promise<url> }
@@ -128,19 +135,22 @@ export function thumb(emoji, imagePath, images) {
   return box;
 }
 
-// Placeholder card for a screenshot that is uploading or being read.
+const hostOf = (url) => { try { return new URL(url).host.replace(/^www\./, ''); } catch (e) { return url; } };
+
+// Placeholder card for a screenshot or link that is uploading or being read.
 export function waitingCard(w, { list, showList, onRetry, onDiscard }) {
   const text = {
     uploading: 'Uploading…',
-    reading: 'Reading screenshot…',
+    reading: w.url ? 'Reading link…' : 'Reading screenshot…',
     slow: 'Still reading. This is taking longer than usual; tap ⟳ to check.',
     failed: 'Upload failed.',
   }[w.state];
-  const box = el('span', { class: 'thumb', 'aria-hidden': 'true' }, w.preview ? el('img', { src: w.preview, alt: '' }) : '📷');
+  const box = el('span', { class: 'thumb', 'aria-hidden': 'true' }, w.preview ? el('img', { src: w.preview, alt: '' }) : w.url ? '🔗' : '📷');
   return el('div', { class: 'item waiting ' + w.state },
     box,
     el('span', { class: 'item-main' },
       el('span', { class: 'item-name' }, text),
+      w.url && el('span', { class: 'item-meta' }, hostOf(w.url)),
       showList && list && el('span', { class: 'tags' }, el('span', { class: 'tag' }, list.name))),
     w.state === 'failed'
       ? el('span', { class: 'row-tools' },
@@ -154,7 +164,7 @@ export function itemCard(item, { list, showList, onOpen, images }) {
   const bought = item.status === 'bought';
   const price = bought && item.bought_price_pence != null ? item.bought_price_pence : lineTotal(item);
   return el('button', { type: 'button', class: 'item', onclick: () => onOpen(item) },
-    thumb((list && list.emoji) || '🛍️', item.image, images),
+    thumb(item.emoji || (list && list.emoji) || '🛍️', item.image, images),
     el('span', { class: 'item-main' },
       el('span', { class: 'item-name' }, item.name),
       meta && el('span', { class: 'item-meta' }, meta),
@@ -195,6 +205,7 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
     field('Plan for', select('needed_by', monthOptions(it.needed_by && it.needed_by.slice(0, 7)), it.needed_by ? it.needed_by.slice(0, 7) : '')),
     field('Priority', select('priority', priorities.map((p) => [p, label(p)]), it.priority)),
     field('Status', select('status', statuses.map((s) => [s, label(s)]), it.status)),
+    field('Emoji', text('emoji', it.emoji, { maxlength: '16', placeholder: 'Shown when there is no picture' })),
     field('Brand', text('brand', it.brand), { check: unsure('brand') && it.brand }),
     field('Retailer', text('retailer', it.retailer), { check: unsure('retailer') && it.retailer }),
     field('Size or colour', text('variant', it.variant), { check: unsure('variant') && it.variant }),
@@ -213,7 +224,7 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
       const f = Object.fromEntries(new FormData(form));
       const str = (v) => (v && v.trim() ? v.trim() : null);
       const values = {
-        name: str(f.name), list_id: f.list_id, price_pence: parsePounds(f.price_pence),
+        name: str(f.name), emoji: str(f.emoji), list_id: f.list_id, price_pence: parsePounds(f.price_pence),
         qty: Math.max(1, parseInt(f.qty, 10) || 1), needed_by: monthEnd(f.needed_by),
         priority: f.priority, status: f.status,
         brand: str(f.brand), retailer: str(f.retailer), variant: str(f.variant),
@@ -235,7 +246,9 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
     },
   },
     review && el('p', { class: 'note wide review-note' },
-      'Read from your screenshot. Check the highlighted fields, then save.'),
+      item.source === 'link'
+        ? 'Read from your link. Check the highlighted fields, then save.'
+        : 'Read from your screenshot. Check the highlighted fields, then save.'),
     field('Name', text('name', it.name, { required: true, enterkeyhint: 'next' }), { wide: true, check: unsure('name') }),
     field('Price (£)', money('price_pence', it.price_pence, { required: true }), { check: unsure('price') }),
     field('List', select('list_id', lists.map((l) => [l.id, `${l.emoji || ''} ${l.name}`.trim()]), it.list_id)),
@@ -245,6 +258,8 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
       el('button', { type: 'submit', class: 'primary' }, review ? 'Looks right, save' : item ? 'Save' : 'Add item'),
       item && item.url && /^https?:\/\//i.test(item.url) &&
         el('a', { class: 'button', href: item.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open link'),
+      item && camelUrl(item.url) &&
+        el('a', { class: 'button', href: camelUrl(item.url), target: '_blank', rel: 'noopener noreferrer' }, 'Price history'),
       item && item.status !== 'bought' && el('button', {
         type: 'button', onclick: () => { boughtRow.hidden = false; boughtRow.querySelector('input').select(); },
       }, 'Mark bought')));
@@ -294,13 +309,49 @@ export function listForm({ list, onSave, onArchive }) {
       list && el('button', { type: 'button', class: 'danger', onclick: onArchive }, list.archived ? 'Unarchive' : 'Archive')));
 }
 
-// Two big choices shown by the Add button.
-export function addChooser({ onScreenshot, onManual }) {
+// The choices shown by the Add button.
+export function addChooser({ onScreenshot, onLink, onManual }) {
   return el('div', { class: 'chooser' },
     el('button', { type: 'button', class: 'primary', onclick: onScreenshot },
       el('span', { class: 'icon', 'aria-hidden': 'true' }, '📷'), 'Screenshot or photo'),
+    el('button', { type: 'button', onclick: onLink },
+      el('span', { class: 'icon', 'aria-hidden': 'true' }, '🔗'), 'Paste a link'),
     el('button', { type: 'button', onclick: onManual },
       el('span', { class: 'icon', 'aria-hidden': 'true' }, '⌨️'), 'Type it in'));
+}
+
+// Paste-a-link form. onSave({ url, list_id, price_pence }) - the price is optional.
+export function linkForm({ lists, listId, onSave }) {
+  const url = el('input', { name: 'url', type: 'url', inputmode: 'url', placeholder: 'https://', required: true, autocomplete: 'off', autocapitalize: 'off', enterkeyhint: 'done' });
+  const price = el('input', { name: 'price', inputmode: 'decimal', placeholder: 'Optional', autocomplete: 'off' });
+  const error = el('p', { class: 'status error', role: 'alert' });
+  const paste = navigator.clipboard && navigator.clipboard.readText && el('button', {
+    type: 'button',
+    onclick: async () => {
+      try { const t = (await navigator.clipboard.readText()).trim(); if (t) url.value = t; } catch (e) { url.focus(); }
+    },
+  }, 'Paste');
+  return el('form', {
+    class: 'form', novalidate: true,
+    onsubmit: (e) => {
+      e.preventDefault();
+      // Share sheets often copy "Product name https://..." - keep just the address.
+      const found = /https?:\/\/\S+/i.exec(url.value);
+      const pence = parsePounds(price.value);
+      const listSel = e.target.querySelector('select[name=list_id]');
+      const problem = !found ? 'Paste a link that starts with https://.'
+        : Number.isNaN(pence) ? 'The price isn’t a number.'
+        : !listSel.value ? 'Choose a list.' : null;
+      error.textContent = problem || '';
+      if (!problem) onSave({ url: found[0], list_id: listSel.value, price_pence: pence });
+    },
+  },
+    field('Link', el('div', { class: 'with-button' }, url, paste), { wide: true }),
+    field('Price (£)', price),
+    field('List', select('list_id', lists.map((l) => [l.id, `${l.emoji || ''} ${l.name}`.trim()]), listId)),
+    el('p', { class: 'note wide' }, 'The name is read from the page. For Amazon, type the price if you can see it; otherwise the latest price from CamelCamelCamel is used and flagged to check.'),
+    error,
+    el('div', { class: 'actions wide' }, el('button', { type: 'submit', class: 'primary' }, 'Add link')));
 }
 
 export function listPicker(lists, onPick) {
