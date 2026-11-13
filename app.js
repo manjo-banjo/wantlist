@@ -5,6 +5,7 @@ import {
   waitingCard, addChooser, listPicker, needsReview,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
+import { DEFAULT_WEIGHTS, compare, todayString } from './js/planner.js';
 
 const root = document.getElementById('app');
 
@@ -268,13 +269,9 @@ function editList(list) {
 
 // ---- items ----
 
-const PRIORITY_RANK = { must: 0, should: 1, nice: 2 };
-
-// Until the score arrives in milestone 4: priority, then needed-by date, then oldest first.
-function byPriority(a, b) {
-  return (PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority])
-    || (a.needed_by || '9999').localeCompare(b.needed_by || '9999')
-    || a.created_at.localeCompare(b.created_at);
+// Priority weights: from settings.json once it exists (Settings screen), otherwise the defaults.
+function weights() {
+  return DEFAULT_WEIGHTS;
 }
 
 function itemsView(list) {
@@ -289,7 +286,7 @@ function itemsView(list) {
   items = items
     .filter((i) => (f.status === 'active' ? isActive(i) : f.status === 'all' ? true : i.status === f.status))
     .filter((i) => f.priority === 'all' || i.priority === f.priority)
-    .sort(byPriority);
+    .sort(compare(weights(), todayString()));
   const total = items.filter(isActive).reduce((sum, i) => sum + lineTotal(i), 0);
   // Items waiting for review come first so they are not missed.
   items.sort((a, b) => needsReview(b) - needsReview(a));
