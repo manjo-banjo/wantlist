@@ -142,7 +142,7 @@ const itemPath = (id) => `items/${id}.json`;
 const metaPath = (id) => `inbox/${id}.meta.json`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const POLL_MS = 10000;          // while a screenshot is being read, check every 10 seconds...
+const POLL_MS = 10000;          // while a screenshot or link is being read, check every 10 seconds...
 const POLL_FOR_MS = 3 * 60000;  // ...for up to 3 minutes
 
 function blobToBase64(blob) {
@@ -280,7 +280,7 @@ export function createStore({ token, user, onChange }) {
       if (!firstSeen.has(id)) firstSeen.set(id, Date.now());
       const up = uploads.get(id);
       out.push({
-        id, list_id: f.data.list_id, added_by: f.data.added_by, preview: up && up.preview,
+        id, list_id: f.data.list_id, added_by: f.data.added_by, preview: up && up.preview, url: f.data.url || null,
         state: Date.now() - firstSeen.get(id) > POLL_FOR_MS ? 'slow' : 'reading',
       });
     }
@@ -341,6 +341,33 @@ export function createStore({ token, user, onChange }) {
     return result;
   }
 
+  // A link has no image: its meta file alone goes to the inbox, and the reader fetches the page.
+  // pricePence is optional (the price the person typed in).
+  function sendLink(url, listId, pricePence) {
+    const id = newId();
+    const meta = { list_id: listId, added_by: user, note: null, url, price_pence: pricePence == null ? null : pricePence };
+    pending++;
+    emit();
+    const run = async () => {
+      try {
+        const sha = await create(() => gh.put(metaPath(id), meta, null, `${user}: add link`));
+        files.set(metaPath(id), { data: meta, sha });
+        status = 'ok';
+        watchInbox();
+      } catch (err) {
+        status = err instanceof Conflict ? 'error' : statusFor(err);
+        throw err;
+      } finally {
+        pending--;
+        saveCache();
+        emit();
+      }
+    };
+    const result = queue.then(run);
+    queue = result.catch(() => {});
+    return result;
+  }
+
   const lists = () => ((files.get('lists.json') || {}).data || []).slice().sort((a, b) => a.order - b.order);
 
   return {
@@ -375,6 +402,7 @@ export function createStore({ token, user, onChange }) {
       const up = uploads.get(id);
       return up && up.state === 'failed' ? sendScreenshot(up) : Promise.resolve();
     },
+    addLink: sendLink,
     discardScreenshot(id) {
       uploads.delete(id);
       emit();
@@ -440,7 +468,7 @@ export function createStore({ token, user, onChange }) {
     addItem(fields) {
       const now = new Date().toISOString();
       const item = {
-        id: newId(), list_id: null, name: '', brand: null, retailer: null, url: null, variant: null,
+        id: newId(), list_id: null, name: '', emoji: null, brand: null, retailer: null, url: null, variant: null,
         price_pence: null, orig_price: null, orig_currency: null, was_price_pence: null, qty: 1,
         priority: 'should', needed_by: null, status: 'considering', notes: null,
         bought_at: null, bought_price_pence: null,

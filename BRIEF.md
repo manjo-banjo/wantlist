@@ -223,7 +223,33 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 | "Include ideas" | A per-device switch on the Planner screen, not saved to `settings.json` |
 | Export | Includes images, embedded in the JSON file. Never includes the token |
 | Service worker | Network first, so a new deploy shows on the next online load; the saved copy is used only offline |
-| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); in `wantlist-data`, `.github/scripts/read-screenshot.mjs` |
+| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs` and `prompts/extract-link.txt` |
+
+### Phase 2: add from link (built 13 Nov 2026)
+
+One-off test first, run from Actions on about a dozen machines, ending with three real links from the owner.
+
+| Finding | Detail |
+|---|---|
+| Share links | `amzn.eu/d/…` redirects to `/dp/<product id>`; reachable and never blocked |
+| Product page | The normal address (`/dp/`) returned a captcha 18 times in 19. The mobile address (`/gp/aw/d/<product id>`) returned the page every time, over 30 fetches |
+| Price | GitHub's machines are in the US. Amazon showed no price for two of three products ("cannot be dispatched to your selected delivery location") and a VAT-free price for the third (£19.74 against £23.69) |
+| Page data | Amazon pages carry no JSON-LD or OpenGraph data |
+| CamelCamelCamel | The product page loads when requested without a browser identity and gives a UK price, a few days old. Products it has never seen have none. Its chart image is blocked |
+
+| Area | Decision |
+|---|---|
+| Entry | **+ Add → Paste a link**: link, optional price, list. Text around the address is dropped ("Name https://…") |
+| Transport | The app commits `inbox/<id>.meta.json` with `url` and `price_pence` and no image. The same Action reads it (workflow renamed "Read inbox"); the card shows "Reading link…" |
+| Reading | Claude (Haiku), with no tools, is given the page title, product data and the first 5,000 characters of page text. The prompt is `prompts/extract-link.txt`. Chosen by the owner over fixed rules |
+| Price, other shops | From the page's JSON-LD or OpenGraph product data when present (not flagged); otherwise the model's reading, flagged by its confidence |
+| Price, Amazon | Never from the Amazon page. The price typed in the form wins. Otherwise CamelCamelCamel's current price (Amazon's own, else the cheapest new third-party one), always flagged, with a note saying where it came from. Otherwise blank and flagged. Chosen by the owner |
+| Images | None are stored for links, to keep the data repo small. Each link item gets an **emoji** chosen by the model, in a new item field `emoji`, editable in the item form. The thumbnail shows the image if there is one, then the item's emoji, then the list's |
+| Stored link | Amazon links are stored as `https://www.amazon.co.uk/dp/<product id>`, without tracking |
+| Price history | Items with an Amazon link show a "Price history" button to the CamelCamelCamel page, built from the link. No new field. Alerts are set up on Camel by hand |
+| `source` | A third value, `link`. Link items are reviewed the same way as screenshot items |
+| Unreadable link | Becomes an item named after whatever title was found, or "Link to fill in", with the link attached and the fields flagged |
+| Not done | Setting a UK delivery postcode on Amazon to get its real price: it means replaying Amazon's form tokens, so it was left out. Reading from a UK machine (the home box) would give the true price and is the route to take if Camel prices prove too stale |
 
 ### How the work is done
 
@@ -238,4 +264,5 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 
 - Screenshot accuracy has only been checked informally by the owner on real retailers. The prompt is `prompts/extract.txt` in `wantlist-data`.
 - How much Claude usage screenshot reading consumes has not been measured.
-- The Amazon iPhone app can't show name and price in one screenshot; the price comes back blank and is typed in. Add-from-link is the intended fix.
+- The Amazon iPhone app can't show name and price in one screenshot; the price comes back blank and is typed in. Add-from-link fixes the name. The price still has to be typed or checked, because Amazon's UK price can't be read from Actions (see "Phase 2: add from link").
+- Add-from-link has been checked on three Amazon links and one IKEA link. Other shops may block the fetch; those links become items to fill in.

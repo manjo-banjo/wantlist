@@ -197,3 +197,7 @@ body.dragging::after {
 .card.risk { border-color: var(--bad); }
 .card.risk h2, .card.risk .plan-row .item-meta { color: var(--bad); }
 .card.risk .plan-row .item-meta { white-space: normal; text-align: right; }
+
+/* An input with a small button beside it (Paste, on the link form). */
+.with-button { display: flex; gap: 8px; }
+.with-button input { flex: 1; min-width: 0; }

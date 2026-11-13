@@ -2,7 +2,7 @@ import { unlock, decryptToken, session } from './js/crypto.js';
 import { createStore, clearCache, DATA_REPO, PRIORITIES, STATUSES } from './js/api.js';
 import {
   el, mount, fmt, lineTotal, isActive, label, toast, sheet, chips, itemCard, itemForm, listForm,
-  waitingCard, addChooser, listPicker, needsReview, fmtMonth, poundsInput, parsePounds,
+  waitingCard, addChooser, linkForm, listPicker, needsReview, fmtMonth, poundsInput, parsePounds,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
 import { compare, todayString, plan, headline, totals } from './js/planner.js';
@@ -343,7 +343,7 @@ function boughtView() {
     items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: true, onOpen: editItem, images })));
 }
 
-// The Add button: screenshot/photo or type it in.
+// The Add button: screenshot/photo, paste a link, or type it in.
 function add(list) {
   const lists = state.store.lists().filter((l) => !l.archived);
   if (!lists.length) { toast('Create a list first.'); return editList(null); }
@@ -353,8 +353,24 @@ function add(list) {
       d.close();
       if (files.length) addScreenshots(files, list ? list.id : null);
     },
+    onLink: () => { d.close(); addLink(list); },
     onManual: () => { d.close(); addItem(list); },
   }));
+}
+
+// Paste a link: the page is fetched and read in the background, like a screenshot.
+function addLink(list) {
+  const store = state.store;
+  const lists = store.lists().filter((l) => !l.archived);
+  const d = sheet('Add from a link', linkForm({
+    lists, listId: list ? list.id : lists[0].id,
+    onSave: ({ url, list_id, price_pence }) => {
+      store.addLink(url, list_id, price_pence).catch(() => toast(
+        store.status === 'offline' ? 'You’re offline. The link wasn’t added.' : 'The link couldn’t be added. Try again.'));
+      d.close();
+    },
+  }));
+  d.querySelector('input[name=url]').focus();
 }
 
 // Compresses and uploads screenshots. listId: where they were dropped, or null.
