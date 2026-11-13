@@ -186,3 +186,56 @@ Stop for review after each one.
 | GitHub Models rate limits | The free tier allows about 150 requests a day on smaller models, far above what two people will use |
 | Actions minutes on a private repo | About 1 minute per screenshot, against 2,000 free minutes a month |
 | Screenshot reading takes about a minute | A placeholder card appears at once, so the user can keep going |
+
+## 9. Decisions from phase 1
+
+Phase 1 is built and in use. Where this section differs from the sections above, this section is what the app does.
+
+### Changed from the original brief
+
+| Area | Decision | Why |
+|---|---|---|
+| Screenshot reading | The Action calls **Claude (Haiku)** through the Claude Code command-line tool, signed in with the `CLAUDE_CODE_OAUTH_TOKEN` secret on `wantlist-data`. Not GitHub Models | GitHub Models failed the one-off test: every request from the repo's Actions, text included, returned a bare "OK", as did GitHub's own `ai-inference` action. Worth retesting in phase 2 as a free alternative |
+| Plan date | `needed_by` is a **month-level plan date**. The field is labelled "Plan for" with a month picker, stored as the last day of that month, and shown as "Dec 2026" | A full date was more admin than the owner wanted |
+| Headline budget | Binary search gives an upper limit, then the app checks below it for the lowest budget that works | Gap-filling means a slightly higher budget can do worse, so binary search alone overshot (£905 where £755 worked) |
+| Review | Saving an item read from a screenshot sets `ai_confidence` to null. That is how "reviewed" is recorded; there is no separate field | Keeps the item schema as specified |
+
+### Filled in where the brief was silent
+
+| Area | Decision |
+|---|---|
+| Login screen | One passphrase field. The app tries it against every entry in `users.json` |
+| `users.json` entry | `name`, `salt`, `iv`, `token` (all but the name base64). The name is bound into the encryption |
+| New item defaults | Priority "should", status "considering" |
+| Price display | Whole pounds everywhere outside the edit form (£4.99 shows as £5) |
+| `added_by` | Set when the item is created and never overwritten. Each commit message in `wantlist-data` starts with the name of whoever made the change |
+| Conflicts | Item edits send only the fields that changed, so two people editing different fields of one item both keep their change |
+| Offline | Read-only. A change made offline is undone with a message, not queued |
+| Unreadable screenshot | Becomes a blank item ("Screenshot to fill in") with the image attached and every field flagged |
+| Missing fields | The model leaves a field blank rather than guessing; the blank is flagged for review |
+| Non-GBP price | Original price and currency are kept; the GBP price is the model's estimate and is always flagged |
+| No list open | Dropping, pasting or picking a screenshot on the Lists or All items screen asks which list |
+| Failed reads | If Claude can't be reached, the screenshot stays in `inbox/` for the next run and becomes a blank item after a second failure |
+| Review threshold | Fields with confidence under 0.7 are highlighted |
+| Planner order | Items are bought in score order with smaller items filling gaps, so a large item can wait behind cheaper, lower-scoring ones. Confirmed by the owner |
+| Overdue items | Items already past their plan month are left out of the headline figure and counted separately |
+| Top-up | Stored in `settings.json` as `top_up: { month, pence }` and applies to that month only |
+| "Include ideas" | A per-device switch on the Planner screen, not saved to `settings.json` |
+| Export | Includes images, embedded in the JSON file. Never includes the token |
+| Service worker | Network first, so a new deploy shows on the next online load; the saved copy is used only offline |
+| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); in `wantlist-data`, `.github/scripts/read-screenshot.mjs` |
+
+### How the work is done
+
+- One feature or milestone at a time. Stop after each and say exactly what the owner needs to do.
+- Work on the session's branch, open one pull request per milestone, and the owner merges. Where both repos change, say which to merge first.
+- Never ask for a token or secret in chat. Secrets are entered on GitHub only.
+- Ask before making any choice the brief doesn't cover.
+- Before any feature that depends on an outside service, run a one-off test of that service first (as with image input in milestone 3). For add-from-link, test whether Amazon share links can be fetched from Actions before building around them.
+- Tests so far are end-to-end checks in a headless browser against an in-memory fake of the GitHub API. They are not in the repo; `tools/planner-test.mjs` is.
+
+### Known gaps going into phase 2
+
+- Screenshot accuracy has only been checked informally by the owner on real retailers. The prompt is `prompts/extract.txt` in `wantlist-data`.
+- How much Claude usage screenshot reading consumes has not been measured.
+- The Amazon iPhone app can't show name and price in one screenshot; the price comes back blank and is typed in. Add-from-link is the intended fix.
