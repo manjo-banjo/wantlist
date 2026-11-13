@@ -181,3 +181,19 @@ body.dragging::after {
   padding-bottom: 100px; font-weight: 600; color: var(--accent);
 }
 .drop-target { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* planner, totals, settings */
+.card .form { width: 100%; }
+.form.three { grid-template-columns: repeat(3, 1fr); }
+.huge { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.big.good { color: var(--good); }
+.toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.toggle input { width: 22px; height: 22px; min-height: 0; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.plan-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px;
+  padding: 6px 0; margin: 0 !important; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; text-align: left;
+}
+.plan-row .item-meta { white-space: nowrap; }
+.card.risk { border-color: var(--bad); }
+.card.risk h2, .card.risk .plan-row .item-meta { color: var(--bad); }
+.card.risk .plan-row .item-meta { white-space: normal; text-align: right; }

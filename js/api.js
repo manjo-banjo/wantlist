@@ -121,6 +121,14 @@ export function clearCache() {
 
 // ---- store ----
 
+export const DEFAULT_SETTINGS = {
+  monthly_budget_pence: 0,
+  currency: 'GBP',
+  weights: { must: 3, should: 2, nice: 1 },
+  rollover: true,
+  top_up: null, // { month: 'YYYY-MM', pence } - a one-off extra that applies to that month only
+};
+
 export const PRIORITIES = ['must', 'should', 'nice'];
 export const STATUSES = ['idea', 'considering', 'ready', 'bought', 'dropped'];
 
@@ -346,6 +354,15 @@ export function createStore({ token, user, onChange }) {
       return out;
     },
     item: (id) => (files.get(itemPath(id)) || {}).data || null,
+
+    settings() {
+      const saved = (files.get('settings.json') || {}).data || {};
+      return { ...DEFAULT_SETTINGS, ...saved, weights: { ...DEFAULT_SETTINGS.weights, ...(saved.weights || {}) } };
+    },
+    // Creates settings.json on first use. Only the changed keys are reapplied on a conflict.
+    updateSettings(patch) {
+      return commit('settings.json', (cur) => ({ ...DEFAULT_SETTINGS, ...(cur || {}), ...patch }), 'update settings');
+    },
 
     // Screenshots that are uploading, being read, or failed to upload.
     waiting,

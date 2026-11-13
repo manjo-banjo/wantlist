@@ -2,10 +2,10 @@ import { unlock, decryptToken, session } from './js/crypto.js';
 import { createStore, clearCache, DATA_REPO, PRIORITIES, STATUSES } from './js/api.js';
 import {
   el, mount, fmt, lineTotal, isActive, label, toast, sheet, chips, itemCard, itemForm, listForm,
-  waitingCard, addChooser, listPicker, needsReview,
+  waitingCard, addChooser, listPicker, needsReview, fmtMonth, poundsInput, parsePounds,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
-import { DEFAULT_WEIGHTS, compare, todayString } from './js/planner.js';
+import { compare, todayString, plan, headline, totals } from './js/planner.js';
 
 const root = document.getElementById('app');
 
@@ -14,6 +14,7 @@ const state = {
   user: null, token: null, store: null,
   filters: { status: 'active', priority: 'all' },
   editingLists: false,
+  includeIdeas: false, // planner switch, per device
 };
 
 const TABS = [
@@ -162,7 +163,7 @@ function render() {
     list: () => (list ? itemsView(list) : loadingView()),
     all: () => itemsView(null),
     bought: boughtView,
-    planner: () => el('div', { class: 'empty' }, el('p', {}, 'The planner arrives in milestone 4.')),
+    planner: plannerView,
     settings: settingsView,
   }[r.view]();
 
@@ -235,6 +236,7 @@ function listsView(lists) {
   };
 
   return el('div', { class: 'cards' },
+    live.length > 0 && totalsCard(),
     live.length
       ? live.map(row)
       : el('div', { class: 'empty' }, el('p', {}, 'No lists yet. Create one to start adding things.')),
@@ -250,6 +252,25 @@ function listsView(lists) {
           el('span', { class: 'thumb', 'aria-hidden': 'true' }, l.emoji || '📋'),
           el('span', { class: 'item-main' }, el('span', { class: 'item-name' }, l.name)),
           el('button', { onclick: () => save(store.updateList(l.id, { archived: false })) }, 'Unarchive'))))));
+}
+
+// Items in lists that are not archived.
+function liveItems() {
+  const live = new Set(state.store.lists().filter((l) => !l.archived).map((l) => l.id));
+  return state.store.items().filter((i) => live.has(i.list_id));
+}
+
+function totalsCard() {
+  const t = totals(liveItems());
+  if (!t.all.count) return null;
+  const line = (group, keys) => keys.filter((k) => group[k]).map((k) =>
+    el('span', { class: 'tag' }, `${label(k)} ${fmt(group[k].total)}`));
+  return el('section', { class: 'card totals' },
+    el('h2', {}, 'Must-haves'),
+    el('p', { class: 'huge' }, fmt(t.must)),
+    el('p', { class: 'note' }, `of ${fmt(t.all.total)} across ${t.all.count} ${t.all.count === 1 ? 'item' : 'items'}`),
+    el('div', { class: 'tags' }, line(t.byPriority, PRIORITIES)),
+    el('div', { class: 'tags' }, line(t.byStatus, STATUSES)));
 }
 
 function editList(list) {
@@ -271,7 +292,7 @@ function editList(list) {
 
 // Priority weights: from settings.json once it exists (Settings screen), otherwise the defaults.
 function weights() {
-  return DEFAULT_WEIGHTS;
+  return state.store.settings().weights;
 }
 
 function itemsView(list) {
@@ -406,9 +427,91 @@ function editItem(item) {
   }));
 }
 
+// ---- planner ----
+
+// A £ input that saves when changed. onSave gets pence (blank counts as 0).
+function moneySetting(labelText, pence, onSave) {
+  const input = el('input', { inputmode: 'decimal', value: pence ? poundsInput(pence) : '', placeholder: '0' });
+  input.addEventListener('change', () => {
+    const value = parsePounds(input.value);
+    if (Number.isNaN(value)) { toast('That isn’t an amount.'); input.value = pence ? poundsInput(pence) : ''; return; }
+    if ((value || 0) !== (pence || 0)) onSave(value || 0);
+  });
+  return el('label', { class: 'field' }, el('span', {}, labelText), input);
+}
+
+function toggle(labelText, checked, onChange) {
+  const box = el('input', { type: 'checkbox', checked });
+  box.addEventListener('change', () => onChange(box.checked));
+  return el('label', { class: 'toggle' }, box, el('span', {}, labelText));
+}
+
+function plannerView() {
+  const store = state.store;
+  const cfg = store.settings();
+  const today = todayString();
+  const thisMonth = today.slice(0, 7);
+  const topUp = cfg.top_up && cfg.top_up.month === thisMonth ? cfg.top_up.pence : 0;
+  const opts = {
+    budget: cfg.monthly_budget_pence, topUp, rollover: cfg.rollover,
+    includeIdeas: state.includeIdeas, weights: cfg.weights, today,
+  };
+  const items = liveItems();
+  const p = plan(items, opts);
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  const inputs = el('section', { class: 'card' },
+    el('div', { class: 'form' },
+      moneySetting('Monthly budget (£)', cfg.monthly_budget_pence, (v) => save(store.updateSettings({ monthly_budget_pence: v }))),
+      moneySetting(`Top-up for ${fmtMonth(thisMonth)} (£)`, topUp,
+        (v) => save(store.updateSettings({ top_up: v ? { month: thisMonth, pence: v } : null })))),
+    toggle('Roll unspent budget into the next month', cfg.rollover, (v) => save(store.updateSettings({ rollover: v }))),
+    toggle('Include ideas', state.includeIdeas, (v) => { state.includeIdeas = v; render(); }));
+
+  if (!cfg.monthly_budget_pence) {
+    return el('div', { class: 'cards' }, inputs,
+      el('div', { class: 'empty' }, el('p', {}, store.status === 'loading' ? 'Loading…' : 'Set a monthly budget to see the plan.')));
+  }
+
+  const h = headline(items, opts);
+  const now = `At ${fmt(h.budget)}/month, `;
+  const headlineText =
+    h.misses === 0 ? now + 'everything lands in its planned month.'
+    : h.needed ? now + `${count(h.misses, 'item misses its month', 'items miss their month')}. ${fmt(h.needed)}/month hits ${h.neededMisses ? 'all that still can be hit' : 'them all'}.`
+    : now + `${count(h.misses, 'item is', 'items are')} already past the planned month.`;
+
+  const name = (i) => i.name + (i.qty > 1 ? ` × ${i.qty}` : '');
+  const row = (i, right) => el('button', { type: 'button', class: 'plan-row', onclick: () => editItem(i) },
+    el('span', {}, name(i)), el('span', { class: 'item-meta' }, right));
+
+  return el('div', { class: 'cards' },
+    inputs,
+    el('section', { class: 'card' },
+      el('h2', {}, 'Headline'),
+      el('p', { class: 'big' + (h.misses ? '' : ' good') }, headlineText)),
+    p.atRisk.length > 0 && el('section', { class: 'card risk' },
+      el('h2', {}, 'At risk'),
+      p.atRisk.map(({ item, key }) => row(item,
+        `wanted ${fmtMonth(item.needed_by)}, ${key ? 'planned ' + fmtMonth(key) : 'not affordable'}`))),
+    p.months.map((m) => el('section', { class: 'card' },
+      el('h2', {}, fmtMonth(m.key)),
+      el('p', { class: 'big' }, `${fmt(m.spent)} of ${fmt(m.available)}, ${count(m.items.length, 'item', 'items')}`),
+      m.items.map((i) => row(i, fmt(lineTotal(i)))),
+      m.savingFor.length > 0 && el('p', { class: 'note' }, 'Saving for: ' + m.savingFor.map(name).join(', ')))),
+    !p.months.length && !p.unscheduled.length && el('div', { class: 'empty' }, el('p', {}, 'Nothing to plan yet.')),
+    p.unscheduled.length > 0 && el('section', { class: 'card' },
+      el('h2', {}, 'Not affordable at this budget'),
+      p.unscheduled.map((i) => row(i, fmt(lineTotal(i))))),
+    p.unpriced.length > 0 && el('section', { class: 'card' },
+      el('h2', {}, 'No price yet'),
+      p.unpriced.map((i) => row(i, 'add a price'))));
+}
+
 // ---- settings ----
 
 function settingsView() {
+  const store = state.store;
+  const cfg = store.settings();
   const [text, tone] = {
     loading: ['Checking connection…', ''],
     syncing: ['Checking connection…', ''],
@@ -416,7 +519,17 @@ function settingsView() {
     denied: ['The token was rejected or can’t see the data repo. It may need rotating.', 'bad'],
     offline: ['Offline. Showing the last saved copy.', ''],
     error: ['GitHub returned an error. Try refreshing in a minute.', 'bad'],
-  }[state.store.status];
+  }[store.status];
+
+  const weight = (p) => {
+    const input = el('input', { type: 'number', min: '0', step: '0.5', inputmode: 'decimal', value: cfg.weights[p] });
+    input.addEventListener('change', () => {
+      const value = Number(input.value);
+      if (!(value >= 0) || input.value === '') { input.value = cfg.weights[p]; return; }
+      save(store.updateSettings({ weights: { ...store.settings().weights, [p]: value } }));
+    });
+    return el('label', { class: 'field' }, el('span', {}, label(p)), input);
+  };
 
   return el('div', { class: 'cards' },
     el('section', { class: 'card' },
@@ -425,8 +538,17 @@ function settingsView() {
       el('p', { class: 'note ' + tone }, text),
       el('button', { class: 'danger', onclick: signOut }, 'Sign out')),
     el('section', { class: 'card' },
-      el('h2', {}, 'Budget, weights and export'),
-      el('p', { class: 'note' }, 'Arrive in milestones 4 and 5.')));
+      el('h2', {}, 'Budget'),
+      el('div', { class: 'form' },
+        moneySetting('Monthly budget (£)', cfg.monthly_budget_pence, (v) => save(store.updateSettings({ monthly_budget_pence: v })))),
+      toggle('Roll unspent budget into the next month', cfg.rollover, (v) => save(store.updateSettings({ rollover: v })))),
+    el('section', { class: 'card' },
+      el('h2', {}, 'Priority weights'),
+      el('p', { class: 'note' }, 'Higher numbers are bought sooner. An item planned within 30 days counts double, within 90 days one and a half times.'),
+      el('div', { class: 'form three' }, PRIORITIES.map(weight))),
+    el('section', { class: 'card' },
+      el('h2', {}, 'Export'),
+      el('p', { class: 'note' }, 'Arrives in milestone 5.')));
 }
 
 start();
