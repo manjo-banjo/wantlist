@@ -271,6 +271,15 @@ export function createStore({ token, user, onChange }) {
 
   // ---- screenshots ----
 
+  // The iOS Shortcut names the list instead of giving its id. Unknown names go to the first list, as in the reader.
+  function listIdByName(name) {
+    const all = lists();
+    const open = all.filter((l) => !l.archived);
+    const key = String(name || '').trim().toLowerCase();
+    const hit = key && (open.find((l) => l.name.trim().toLowerCase() === key) || all.find((l) => l.name.trim().toLowerCase() === key));
+    return (hit || open[0] || all[0] || {}).id || null;
+  }
+
   function waiting() {
     const out = [];
     for (const up of uploads.values()) if (up.state !== 'reading') out.push(up);
@@ -281,7 +290,7 @@ export function createStore({ token, user, onChange }) {
       if (!firstSeen.has(id)) firstSeen.set(id, Date.now());
       const up = uploads.get(id);
       out.push({
-        id, list_id: f.data.list_id, added_by: f.data.added_by, preview: up && up.preview, url: f.data.url || null,
+        id, list_id: f.data.list_id || listIdByName(f.data.list_name), added_by: f.data.added_by, preview: up && up.preview, url: f.data.url || null,
         state: Date.now() - firstSeen.get(id) > POLL_FOR_MS ? 'slow' : 'reading',
       });
     }

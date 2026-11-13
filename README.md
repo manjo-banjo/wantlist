@@ -35,6 +35,9 @@ Names in `users.json` are public. To remove a user, delete their entry and rotat
 1. Revoke the old token on GitHub and generate a new one with the same settings.
 2. Re-run the add-user tool for every user with the new token. Passphrases can stay the same.
 3. Replace the entries in `users.json` and commit. Each device asks for the passphrase again.
+4. On each iPhone with the Shortcut, open it in the Shortcuts app and paste the new token into the first Text action.
+
+Rotate the token if a phone with the Shortcut is lost: the Shortcut holds it unencrypted.
 
 Changing which repositories an existing token can reach does not change its value, so no entries need redoing.
 
@@ -51,6 +54,7 @@ Once opened online, the app also opens with no connection and shows the last syn
 | To | Do |
 |---|---|
 | Add from a screenshot | **+ Add → Screenshot or photo**. On desktop, drop images anywhere or paste. A card shows "Reading screenshot…" and fills in within about a minute |
+| Add from the share sheet | Build the iOS Shortcut once ([tools/shortcut.md](tools/shortcut.md)). Then share a screenshot or a product link from any app, tap **Add to Want List** and pick a list |
 | Add from a link | **+ Add → Paste a link**. Paste a product link or an Amazon share link, type the price if you can see it, and pick a list. A card shows "Reading link…" and fills in within about a minute. No picture is kept; the item gets an emoji instead |
 | Check a price | Open an item that has a link and tap **Check price**, or tap **Check N prices** at the top of a list. Results arrive in a minute or two as tags: "↓ £6", "↑ £6" or "Price not found". A changed price is applied straight away and the old one is kept as the was-price |
 | Watch for a target | Set a **Target price** on the item. After a check, an item at or below it shows "Target reached" |
@@ -96,6 +100,7 @@ js/  api.js      GitHub reads and writes, cache, the data store
      ui.js       formatting and shared screen pieces
 users.json                encrypted per-user entries
 tools/add-user.html       makes a users.json entry
+tools/shortcut.md         how to build the iOS share-sheet Shortcut
 tools/planner-test.mjs    hand-checked planner example: node tools/planner-test.mjs
 .github/workflows/pages.yml
 ```
