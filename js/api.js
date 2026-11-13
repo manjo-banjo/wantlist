@@ -276,6 +276,7 @@ export function createStore({ token, user, onChange }) {
     for (const up of uploads.values()) if (up.state !== 'reading') out.push(up);
     for (const [path, f] of files) {
       if (!path.startsWith('inbox/') || !path.endsWith('.meta.json')) continue;
+      if (Array.isArray(f.data.check)) continue; // a price-check request, not a new item
       const id = path.slice('inbox/'.length, -'.meta.json'.length);
       if (!firstSeen.has(id)) firstSeen.set(id, Date.now());
       const up = uploads.get(id);
@@ -287,12 +288,27 @@ export function createStore({ token, user, onChange }) {
     return out;
   }
 
+  // Price checks that have been asked for and not yet done. Returns the ids of the items being
+  // checked; `active` is false once the request has waited longer than the app keeps polling.
+  function checking() {
+    const ids = new Set();
+    let active = false;
+    for (const [path, f] of files) {
+      if (!path.startsWith('inbox/') || !path.endsWith('.meta.json') || !Array.isArray(f.data.check)) continue;
+      if (!firstSeen.has(path)) firstSeen.set(path, Date.now());
+      if (Date.now() - firstSeen.get(path) > POLL_FOR_MS) continue; // given up on: stop showing it as in progress
+      active = true;
+      for (const id of f.data.check) ids.add(id);
+    }
+    return { ids, active };
+  }
+
   let pollTimer = null;
   function watchInbox() {
-    const reading = waiting().some((w) => w.state === 'reading');
-    if (reading && !pollTimer) {
+    const busy = () => waiting().some((w) => w.state === 'reading') || checking().active;
+    if (busy() && !pollTimer) {
       pollTimer = setInterval(() => {
-        if (!waiting().some((w) => w.state === 'reading')) { clearInterval(pollTimer); pollTimer = null; emit(); return; }
+        if (!busy()) { clearInterval(pollTimer); pollTimer = null; emit(); return; }
         if (document.visibilityState === 'visible') refresh({ quiet: true });
       }, POLL_MS);
     }
@@ -368,6 +384,32 @@ export function createStore({ token, user, onChange }) {
     return result;
   }
 
+  // Asks the reader to look up today's price for these items. Nothing changes until it has run.
+  function sendCheck(ids) {
+    const path = metaPath(newId());
+    const meta = { check: ids, added_by: user };
+    pending++;
+    emit();
+    const run = async () => {
+      try {
+        const sha = await create(() => gh.put(path, meta, null, `${user}: check ${ids.length === 1 ? 'a price' : ids.length + ' prices'}`));
+        files.set(path, { data: meta, sha });
+        status = 'ok';
+        watchInbox();
+      } catch (err) {
+        status = err instanceof Conflict ? 'error' : statusFor(err);
+        throw err;
+      } finally {
+        pending--;
+        saveCache();
+        emit();
+      }
+    };
+    const result = queue.then(run);
+    queue = result.catch(() => {});
+    return result;
+  }
+
   const lists = () => ((files.get('lists.json') || {}).data || []).slice().sort((a, b) => a.order - b.order);
 
   return {
@@ -403,6 +445,8 @@ export function createStore({ token, user, onChange }) {
       return up && up.state === 'failed' ? sendScreenshot(up) : Promise.resolve();
     },
     addLink: sendLink,
+    checkPrices: sendCheck,
+    checking: () => checking().ids,
     discardScreenshot(id) {
       uploads.delete(id);
       emit();
