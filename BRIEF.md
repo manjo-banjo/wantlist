@@ -223,7 +223,7 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 | "Include ideas" | A per-device switch on the Planner screen, not saved to `settings.json` |
 | Export | Includes images, embedded in the JSON file. Never includes the token |
 | Service worker | Network first, so a new deploy shows on the next online load; the saved copy is used only offline |
-| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
+| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); `js/duplicates.js` and `tools/duplicates-test.mjs`; in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
 
 ### Phase 2: add from link (built 13 Nov 2026)
 
@@ -276,6 +276,20 @@ Replaces the brief's daily price check. The owner did not want a scheduled job u
 | Choosing a list | Asked on every share. The Shortcut reads `shortcut/lists.txt` in `wantlist-data` (names of lists that are not archived, one per line), which a small Action rewrites whenever `lists.json` changes. The Shortcut sends `list_name`; the reader turns it into `list_id`, falling back to the first list |
 | Tolerances in the reader | Curly quotes in the details file are read as plain ones. A web address wins over a picture sent with it; any other address with a picture is treated as a screenshot |
 | Not tested | The Shortcut itself, on a phone. The reader was tested on Actions with files shaped like the Shortcut's |
+
+### Phase 2: duplicate detection (built 13 Nov 2026)
+
+| Area | Decision |
+|---|---|
+| Where | Worked out live in the app from the items already loaded (`js/duplicates.js`). No Action, no Claude, nothing stored except the owner's "Keep both" |
+| Same link | The same Amazon product id, or the same address ignoring tracking codes |
+| Same name | The same words, or at least two shared words making up two thirds of the shorter name. Capitals, punctuation, filler words and the brand are ignored; if both items give a brand and the brands differ, names are not compared. The owner chose this looser rule knowing it flags near-twins such as a left and a right sofa piece |
+| Compared against | Wanted items in every list. Bought and dropped items are ignored. Chosen by the owner |
+| Display | Both items get a "Duplicate?" tag. The item sheet names the other item and offers **Keep both** or **Drop this one** |
+| Keep both | Stored on the item as `not_duplicate_of: [ids]`; that pair is not flagged again |
+| Drop this one | Sets the status to "dropped" |
+| At the point of adding | Typing an item that matches, or pasting a link already listed, warns once; a second tap adds it anyway. Screenshots and share links can only be matched after they have been read, so they get the tag then |
+| Test | `tools/duplicates-test.mjs` holds hand-picked examples of the rule |
 
 ### How the work is done
 

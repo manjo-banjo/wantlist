@@ -6,6 +6,7 @@ import {
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
 import { compare, todayString, plan, headline, totals } from './js/planner.js';
+import { duplicatesOf, duplicateIds } from './js/duplicates.js';
 
 const root = document.getElementById('app');
 
@@ -313,6 +314,7 @@ function itemsView(list) {
   items.sort((a, b) => needsReview(b) - needsReview(a));
   const waiting = store.waiting().filter((w) => (list ? w.list_id === list.id : true));
   const checking = store.checking();
+  const dupes = duplicateIds(store.items()); // across every list
   // Every wanted item in this list that has a link, whatever the filters show.
   const checkable = list ? store.items().filter((i) => i.list_id === list.id && canCheck(i)) : [];
 
@@ -330,7 +332,7 @@ function itemsView(list) {
       onDiscard: (x) => store.discardScreenshot(x.id),
     })),
     items.length
-      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images, checking: checking.has(i.id) }))
+      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images, checking: checking.has(i.id), duplicate: dupes.has(i.id) }))
       : !waiting.length && el('div', { class: 'empty' }, el('p', {},
         store.status === 'loading' ? 'Loading…' : scope ? 'Nothing matches these filters.' : 'Nothing here yet. Tap Add.')));
 }
@@ -370,6 +372,7 @@ function addLink(list) {
   const lists = store.lists().filter((l) => !l.archived);
   const d = sheet('Add from a link', linkForm({
     lists, listId: list ? list.id : lists[0].id,
+    findDuplicates: (url) => withLists(duplicatesOf({ name: '', url }, store.items()).filter((d) => d.reason === 'link')),
     onSave: ({ url, list_id, price_pence }) => {
       store.addLink(url, list_id, price_pence).catch(() => toast(
         store.status === 'offline' ? 'You’re offline. The link wasn’t added.' : 'The link couldn’t be added. Try again.'));
@@ -408,6 +411,7 @@ function addItem(list) {
   if (!lists.length) { toast('Create a list first.'); return editList(null); }
   const d = sheet('Add item', itemForm({
     item: null, lists, listId: list ? list.id : lists[0].id, priorities: PRIORITIES, statuses: STATUSES,
+    findDuplicates: (values) => withLists(duplicatesOf(values, store.items())),
     onSave: (values) => {
       save(store.addItem(withBoughtFields(values, null)));
       d.close();
@@ -426,6 +430,12 @@ function withBoughtFields(values, item) {
   return values;
 }
 
+// Adds each look-alike's list, for display.
+function withLists(found) {
+  const byId = new Map(state.store.lists().map((l) => [l.id, l]));
+  return found.map((d) => ({ ...d, list: byId.get(d.item.list_id) || null }));
+}
+
 // Asks for today's price of each item. The answer arrives in the background, like a screenshot.
 function checkPrices(items) {
   const store = state.store;
@@ -440,6 +450,7 @@ function editItem(item) {
   const store = state.store;
   // Archived lists stay selectable only for an item that is already in one.
   const lists = store.lists().filter((l) => !l.archived || l.id === item.list_id);
+  const duplicates = withLists(duplicatesOf(item, store.items()));
   const d = sheet('Item', itemForm({
     item, lists, priorities: PRIORITIES, statuses: STATUSES, images,
     onSave: (values) => {
@@ -452,6 +463,13 @@ function editItem(item) {
       if (Object.keys(patch).length) save(store.updateItem(item.id, patch));
       d.close();
     },
+    duplicates,
+    onKeepBoth: () => {
+      const ids = [...new Set([...(item.not_duplicate_of || []), ...duplicates.map((x) => x.item.id)])];
+      save(store.updateItem(item.id, { not_duplicate_of: ids }));
+      d.close();
+    },
+    onDrop: () => { save(store.updateItem(item.id, { status: 'dropped' }, 'drop')); d.close(); },
     onCheck: () => { checkPrices([item]); d.close(); },
     checking: store.checking().has(item.id),
     onBought: (pence) => {

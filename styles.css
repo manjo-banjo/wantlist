@@ -208,3 +208,8 @@ body.dragging::after {
 .tag.checking { font-style: italic; }
 .list-tools { display: flex; justify-content: flex-end; }
 .list-tools button { min-height: 40px; font-size: 14px; padding: 6px 14px; }
+
+/* Duplicates. */
+.duplicate-note { border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.duplicate-note button { background: var(--card); color: var(--text); min-height: 40px; }
+.duplicate-note button.danger { color: var(--bad); }
