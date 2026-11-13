@@ -114,7 +114,7 @@ export function plan(items, opts = {}) {
 }
 
 // The minimum monthly budget (whole pounds, in pence) that meets every needed-by date that can
-// still be met, found by binary search. Top-up, rollover and the ideas switch stay as given.
+// still be met, found by binary search and then a check for anything lower. Top-up, rollover and the ideas switch stay as given.
 // Returns { budget, misses, needed, neededMisses }:
 //   misses:       items missing their date at the current budget
 //   needed:       the minimum budget, or null if the current budget already does as well as any
@@ -133,6 +133,13 @@ export function headline(items, opts = {}) {
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
     if (missesAt(mid * 100) <= best) hi = mid; else lo = mid;
+  }
+  // Filling gaps with smaller items means a slightly higher budget can sometimes do worse, so the
+  // binary search only gives a budget that is sure to work. Check below it for a smaller one.
+  const from = Math.floor(budget / 100) + 1;
+  const step = Math.max(1, Math.ceil((hi - from) / 5000));
+  for (let b = from; b < hi; b += step) {
+    if (missesAt(b * 100) <= best) { hi = b; break; }
   }
   return { budget, misses, needed: hi * 100, neededMisses: best };
 }

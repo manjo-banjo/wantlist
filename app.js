@@ -493,7 +493,7 @@ function plannerView() {
       el('h2', {}, 'At risk'),
       p.atRisk.map(({ item, key }) => row(item,
         `wanted ${fmtMonth(item.needed_by)}, ${key ? 'planned ' + fmtMonth(key) : 'not affordable'}`))),
-    p.months.map((m) => el('section', { class: 'card' },
+    p.months.map((m) => el('section', { class: 'card month' },
       el('h2', {}, fmtMonth(m.key)),
       el('p', { class: 'big' }, `${fmt(m.spent)} of ${fmt(m.available)}, ${count(m.items.length, 'item', 'items')}`),
       m.items.map((i) => row(i, fmt(lineTotal(i)))),

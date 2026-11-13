@@ -72,6 +72,17 @@ const top = plan(items, { ...opts, topUp: 40000 });
 assert.deepEqual(top.months.map((m) => m.items.map((i) => i.id).join(' ')), ['Kettle Mixer Lamp', 'Rug', 'Sofa']);
 assert.deepEqual(top.atRisk.map((r) => [r.item.id, r.key]), [['Sofa', '2027-01']]);
 
+// Not every budget above the minimum works. With month-end dates the Lamp scores 1.5, below the Rug:
+// order Kettle, Sofa, Mixer, Rug, Lamp. At £755 November buys Kettle, Mixer, Lamp (£145 left) and
+// December's £900 buys the Sofa. At £760 November buys the Rug instead of the Lamp (£0 left), so
+// December's £760 can't cover the Sofa. Budgets work again from £905. The answer is the lowest: £755.
+const monthEnd = items.map((i) => ({ ...i, needed_by: { Sofa: '2026-12-31', Lamp: '2026-12-31', Mixer: '2027-01-31' }[i.id] || i.needed_by }));
+assert.equal(plan(monthEnd, { ...opts, budget: 75500 }).atRisk.length, 0);
+assert.equal(plan(monthEnd, { ...opts, budget: 76000 }).atRisk.length, 1);
+assert.equal(plan(monthEnd, { ...opts, budget: 90400 }).atRisk.length, 1);
+assert.equal(plan(monthEnd, { ...opts, budget: 90500 }).atRisk.length, 0);
+assert.equal(headline(monthEnd, opts).needed, 75500);
+
 // Ideas are left out unless switched on; bought and dropped never plan; no price = unpriced.
 const more = [...items, item('Idea', 'must', 10, null, { status: 'idea' }), item('Done', 'must', 10, null, { status: 'bought' }),
   { ...item('NoPrice', 'must', 0, null), price_pence: null }];
