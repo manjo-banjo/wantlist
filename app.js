@@ -5,7 +5,7 @@ import {
   waitingCard, addChooser, linkForm, listPicker, canCheck, needsReview, fmtMonth, poundsInput, parsePounds,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
-import { compare, todayString, plan, headline, totals } from './js/planner.js';
+import { compare, todayString, plan, headline, totals, spendHistory, paid } from './js/planner.js';
 import { duplicatesOf, duplicateIds } from './js/duplicates.js';
 
 const root = document.getElementById('app');
@@ -337,16 +337,55 @@ function itemsView(list) {
         store.status === 'loading' ? 'Loading…' : scope ? 'Nothing matches these filters.' : 'Nothing here yet. Tap Add.')));
 }
 
+// One line of the spend history: what was spent in a month against what was available.
+function historyRow(r, hasBudget) {
+  const count = `${r.items.length} ${r.items.length === 1 ? 'item' : 'items'}`;
+  const verdict = !hasBudget ? null
+    : r.left < 0 ? [`${fmt(-r.left)} over`, 'item-meta bad']
+    : r.current ? [`${fmt(r.left)} left`, 'item-meta good']
+    : [r.left === 0 ? 'On budget' : `${fmt(r.left)} under`, 'item-meta good'];
+  const carried = r.carried > 0 ? `includes ${fmt(r.carried)} carried over`
+    : r.carried < 0 ? `after ${fmt(-r.carried)} overspent earlier` : null;
+  const extra = [r.topUp > 0 && `${fmt(r.topUp)} top-up`, carried].filter(Boolean).join(' · ');
+  return el('div', { class: 'plan-row history-row' },
+    el('span', { class: 'item-main' },
+      el('span', { class: 'item-name' }, fmtMonth(r.key) + (r.current ? ' (so far)' : '')),
+      el('span', { class: 'item-meta' }, [count, hasBudget && extra].filter(Boolean).join(' · '))),
+    el('span', { class: 'item-price' },
+      el('span', {}, hasBudget ? `${fmt(r.spent)} of ${fmt(r.available)}` : fmt(r.spent)),
+      verdict && el('span', { class: verdict[1] }, verdict[0])));
+}
+
+// Spend against budget, month by month, newest first.
+function historyCard(items, cfg) {
+  const rows = spendHistory(items, cfg, todayString());
+  if (!rows.length) return null;
+  const hasBudget = rows.some((r) => r.budget > 0 || r.topUp > 0);
+  const year = todayString().slice(0, 4);
+  const inYear = rows.filter((r) => r.key.startsWith(year));
+  const spent = inYear.reduce((sum, r) => sum + r.spent, 0);
+  const budget = inYear.reduce((sum, r) => sum + r.budget + r.topUp, 0);
+  const shown = state.allHistory ? rows : rows.slice(0, 12);
+  return el('section', { class: 'card history' },
+    el('h2', {}, 'Spend against budget'),
+    el('p', { class: 'big' }, hasBudget ? `${fmt(spent)} of ${fmt(budget)} in ${year}` : `${fmt(spent)} in ${year}`),
+    !hasBudget && el('p', { class: 'note' }, 'Set a monthly budget in Settings to compare.'),
+    hasBudget && cfg.rollover && el('p', { class: 'note' }, 'Unspent budget rolls into the next month, and an overspend comes off it.'),
+    shown.map((r) => historyRow(r, hasBudget)),
+    rows.length > shown.length && el('button', { type: 'button', onclick: () => { state.allHistory = true; render(); } }, 'Show earlier months'));
+}
+
 function boughtView() {
   const store = state.store;
   const byId = new Map(store.lists().map((l) => [l.id, l]));
   const items = store.items().filter((i) => i.status === 'bought')
     .sort((a, b) => (b.bought_at || '').localeCompare(a.bought_at || ''));
-  const spent = items.reduce((sum, i) => sum + (i.bought_price_pence != null ? i.bought_price_pence : lineTotal(i)), 0);
+  const spent = items.reduce((sum, i) => sum + paid(i), 0);
   if (!items.length) {
     return el('div', { class: 'empty' }, el('p', {}, store.status === 'loading' ? 'Loading…' : 'Nothing bought yet.'));
   }
   return el('div', { class: 'cards' },
+    historyCard(items, store.settings()),
     el('p', { class: 'note summary' }, `${items.length} bought · ${fmt(spent)} spent`),
     items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: true, onOpen: editItem, images })));
 }

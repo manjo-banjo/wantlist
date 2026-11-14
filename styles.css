@@ -213,3 +213,8 @@ body.dragging::after {
 .duplicate-note { border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .duplicate-note button { background: var(--card); color: var(--text); min-height: 40px; }
 .duplicate-note button.danger { color: var(--bad); }
+
+/* Spend against budget. */
+.card.history .history-row { align-items: flex-start; }
+.item-meta.good { color: var(--good); }
+.item-meta.bad { color: var(--bad); }
