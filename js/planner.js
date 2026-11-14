@@ -166,3 +166,53 @@ export function totals(items) {
   }
   return out;
 }
+
+// ---- spend against budget (looking back) ----
+
+// The month a purchase falls in, in the device's own time zone: ISO timestamp -> 'YYYY-MM'.
+export function monthKey(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// What an item actually cost: the price paid if recorded, otherwise price x quantity.
+export const paid = (item) => (item.bought_price_pence != null ? item.bought_price_pence : cost(item));
+
+// The budget that applied in one month. settings.budgets holds a record for each month in which the
+// budget was set or something was bought; months without one use the settings as they are now.
+export function budgetFor(settings, key) {
+  const saved = settings.budgets && settings.budgets[key];
+  if (saved) return { budget: saved.budget_pence || 0, topUp: saved.top_up_pence || 0 };
+  const topUp = settings.top_up && settings.top_up.month === key ? settings.top_up.pence || 0 : 0;
+  return { budget: settings.monthly_budget_pence || 0, topUp };
+}
+
+// One row per month from the first purchase to this month, newest first.
+//   { key, items, spent, budget, topUp, carried, available, left, current }
+// carried: what earlier months left over (or overspent, if negative) when rollover is on; always 0 when
+// it is off. available = budget + topUp + carried. left = available - spent (negative means over).
+export function spendHistory(items, settings, today = todayString()) {
+  const thisMonth = today.slice(0, 7);
+  const byMonth = new Map();
+  for (const item of items) {
+    if (item.status !== 'bought' || !item.bought_at) continue;
+    const key = monthKey(item.bought_at);
+    if (!key || key > thisMonth) continue;
+    if (!byMonth.has(key)) byMonth.set(key, []);
+    byMonth.get(key).push(item);
+  }
+  if (!byMonth.size) return [];
+
+  const rows = [];
+  let carried = 0;
+  for (let key = [...byMonth.keys()].sort()[0], n = 0; key <= thisMonth && n < MAX_MONTHS; key = addMonths(key, 1), n++) {
+    const bought = byMonth.get(key) || [];
+    const { budget, topUp } = budgetFor(settings, key);
+    const spent = bought.reduce((sum, i) => sum + paid(i), 0);
+    const available = budget + topUp + carried;
+    const left = available - spent;
+    rows.push({ key, items: bought, spent, budget, topUp, carried, available, left, current: key === thisMonth });
+    carried = settings.rollover ? left : 0;
+  }
+  return rows.reverse();
+}

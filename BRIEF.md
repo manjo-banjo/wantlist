@@ -223,7 +223,7 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 | "Include ideas" | A per-device switch on the Planner screen, not saved to `settings.json` |
 | Export | Includes images, embedded in the JSON file. Never includes the token |
 | Service worker | Network first, so a new deploy shows on the next online load; the saved copy is used only offline |
-| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); `js/duplicates.js` and `tools/duplicates-test.mjs`; in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
+| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); `js/duplicates.js`, `tools/duplicates-test.mjs` and `tools/history-test.mjs`; in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
 
 ### Phase 2: add from link (built 13 Nov 2026)
 
@@ -290,6 +290,20 @@ Replaces the brief's daily price check. The owner did not want a scheduled job u
 | Drop this one | Sets the status to "dropped" |
 | At the point of adding | Typing an item that matches, or pasting a link already listed, warns once; a second tap adds it anyway. Screenshots and share links can only be matched after they have been read, so they get the tag then |
 | Test | `tools/duplicates-test.mjs` holds hand-picked examples of the rule |
+
+### Phase 2: spend versus budget history (built 14 Nov 2026)
+
+| Area | Decision |
+|---|---|
+| Where | A "Spend against budget" card at the top of the Bought screen. Worked out in the app (`spendHistory` in `js/planner.js`); no Action, no Claude |
+| Rows | One per month from the first purchase to this month, newest first, twelve shown with a button for earlier ones. Months with nothing bought still appear |
+| Spend | The price paid for each bought item (price × quantity if none was recorded), in the month of `bought_at` on the device's clock |
+| Allowance | That month's budget, plus its top-up, plus what earlier months carried over |
+| Rollover | Follows the rollover setting. On: an underspend is added to the next month and an overspend is taken off it, starting from the first purchase. Off: each month stands alone. Chosen by the owner |
+| Past budgets | `settings.json` gains `budgets: { 'YYYY-MM': { budget_pence, top_up_pence } }`. A month is recorded when something is bought in it or when the budget or top-up is changed in it. Changing the budget first pins every earlier unrecorded month to the old figure, so history does not move. Months with no record use the settings as they are. Chosen by the owner |
+| Headline | Spent and budgeted so far this calendar year |
+| No budget set | The card shows spend only |
+| Test | `tools/history-test.mjs` holds a hand-checked example |
 
 ### How the work is done
 

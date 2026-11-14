@@ -5,6 +5,8 @@
 // Every change is expressed as a function applied to the latest version of one file, so a
 // retry never throws away somebody else's edit to other fields.
 
+import { monthKey } from './planner.js';
+
 export const DATA_REPO = 'manjo-banjo/wantlist-data';
 
 const API = 'https://api.github.com';
@@ -127,6 +129,7 @@ export const DEFAULT_SETTINGS = {
   weights: { must: 3, should: 2, nice: 1 },
   rollover: true,
   top_up: null, // { month: 'YYYY-MM', pence } - a one-off extra that applies to that month only
+  budgets: {},  // 'YYYY-MM' -> { budget_pence, top_up_pence }: the budget as it stood in that month, for the spend history
 };
 
 export const PRIORITIES = ['must', 'should', 'nice'];
@@ -419,6 +422,44 @@ export function createStore({ token, user, onChange }) {
     return result;
   }
 
+  // The budget as it stands for one month, in the form kept in settings.budgets.
+  const budgetRecord = (s, month) => ({
+    budget_pence: s.monthly_budget_pence || 0,
+    top_up_pence: s.top_up && s.top_up.month === month ? s.top_up.pence || 0 : 0,
+  });
+
+  // Every month from the first purchase to this one, oldest first.
+  function monthsSinceFirstPurchase() {
+    const now = monthKey(new Date().toISOString());
+    let first = now;
+    for (const [path, f] of files) {
+      if (!path.startsWith('items/') || f.data.status !== 'bought' || !f.data.bought_at) continue;
+      const m = monthKey(f.data.bought_at);
+      if (m && m < first) first = m;
+    }
+    const out = [];
+    for (let y = +first.slice(0, 4), mo = +first.slice(5, 7); out.length < 240; mo === 12 ? (y++, mo = 1) : mo++) {
+      const key = `${y}-${String(mo).padStart(2, '0')}`;
+      out.push(key);
+      if (key >= now) break;
+    }
+    return out;
+  }
+
+  // Called when something is bought: keeps a record of that month's budget if there isn't one yet,
+  // so a later change to the budget doesn't rewrite the history. Only for the current month.
+  function noteSpend(boughtAt) {
+    const month = monthKey(boughtAt);
+    if (!month || month !== monthKey(new Date().toISOString())) return;
+    const have = ((files.get('settings.json') || {}).data || {}).budgets || {};
+    if (have[month]) return;
+    commit('settings.json', (cur) => {
+      const next = { ...DEFAULT_SETTINGS, ...(cur || {}) };
+      if (!(next.budgets || {})[month]) next.budgets = { ...(next.budgets || {}), [month]: budgetRecord(next, month) };
+      return next;
+    }, 'record this month’s budget').catch(() => {});
+  }
+
   const lists = () => ((files.get('lists.json') || {}).data || []).slice().sort((a, b) => a.order - b.order);
 
   return {
@@ -438,8 +479,23 @@ export function createStore({ token, user, onChange }) {
       return { ...DEFAULT_SETTINGS, ...saved, weights: { ...DEFAULT_SETTINGS.weights, ...(saved.weights || {}) } };
     },
     // Creates settings.json on first use. Only the changed keys are reapplied on a conflict.
+    // Changing the budget or the top-up also records this month's budget for the spend history, and
+    // first pins every earlier month that has no record to the budget as it was before the change.
     updateSettings(patch) {
-      return commit('settings.json', (cur) => ({ ...DEFAULT_SETTINGS, ...(cur || {}), ...patch }), 'update settings');
+      const month = monthKey(new Date().toISOString());
+      const budgetChanged = 'monthly_budget_pence' in patch || 'top_up' in patch;
+      const earlier = budgetChanged ? monthsSinceFirstPurchase().filter((m) => m < month) : [];
+      return commit('settings.json', (cur) => {
+        const before = { ...DEFAULT_SETTINGS, ...(cur || {}) };
+        const next = { ...before, ...patch };
+        if (budgetChanged) {
+          const budgets = { ...(before.budgets || {}) };
+          for (const m of earlier) if (!budgets[m]) budgets[m] = budgetRecord(before, m);
+          budgets[month] = budgetRecord(next, month);
+          next.budgets = budgets;
+        }
+        return next;
+      }, 'update settings');
     },
 
     // Screenshots that are uploading, being read, or failed to upload.
@@ -530,6 +586,7 @@ export function createStore({ token, user, onChange }) {
         target_price_pence: null, not_duplicate_of: [],
         ...fields,
       };
+      if (item.bought_at) noteSpend(item.bought_at);
       return commit(itemPath(item.id), (cur) => cur || item, `add "${item.name}"`);
     },
 
@@ -537,6 +594,7 @@ export function createStore({ token, user, onChange }) {
       if (!this.item(id)) return Promise.resolve(null);
       const now = new Date().toISOString();
       const name = patch.name || (this.item(id) || {}).name || id;
+      if (patch.bought_at) noteSpend(patch.bought_at);
       return commit(itemPath(id), (cur) => (cur ? { ...cur, ...patch, updated_at: now } : cur), `${what} "${name}"`);
     },
   };
