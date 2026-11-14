@@ -5,7 +5,7 @@ import {
   waitingCard, addChooser, linkForm, listPicker, canCheck, needsReview, fmtMonth, poundsInput, parsePounds,
 } from './js/ui.js';
 import { compress, pickImages, initCapture } from './js/capture.js';
-import { compare, todayString, plan, headline, totals, spendHistory, paid } from './js/planner.js';
+import { compare, todayString, plan, headline, totals, spendHistory, paid, readyFrom } from './js/planner.js';
 import { duplicatesOf, duplicateIds } from './js/duplicates.js';
 
 const root = document.getElementById('app');
@@ -313,6 +313,7 @@ function itemsView(list) {
   // Items waiting for review come first so they are not missed.
   items.sort((a, b) => needsReview(b) - needsReview(a));
   const waiting = store.waiting().filter((w) => (list ? w.list_id === list.id : true));
+  const cfg = store.settings();
   const checking = store.checking();
   const dupes = duplicateIds(store.items()); // across every list
   // Every wanted item in this list that has a link, whatever the filters show.
@@ -332,7 +333,7 @@ function itemsView(list) {
       onDiscard: (x) => store.discardScreenshot(x.id),
     })),
     items.length
-      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images, checking: checking.has(i.id), duplicate: dupes.has(i.id) }))
+      ? items.map((i) => itemCard(i, { list: byId.get(i.list_id), showList: !list, onOpen: editItem, images, checking: checking.has(i.id), duplicate: dupes.has(i.id), readyFrom: readyFrom(i, cfg) }))
       : !waiting.length && el('div', { class: 'empty' }, el('p', {},
         store.status === 'loading' ? 'Loading…' : scope ? 'Nothing matches these filters.' : 'Nothing here yet. Tap Add.')));
 }
@@ -451,6 +452,7 @@ function addItem(list) {
   const d = sheet('Add item', itemForm({
     item: null, lists, listId: list ? list.id : lists[0].id, priorities: PRIORITIES, statuses: STATUSES,
     findDuplicates: (values) => withLists(duplicatesOf(values, store.items())),
+    readyFrom: (priority) => readyFrom({ priority, status: 'considering' }, store.settings()),
     onSave: (values) => {
       save(store.addItem(withBoughtFields(values, null)));
       d.close();
@@ -503,6 +505,7 @@ function editItem(item) {
       d.close();
     },
     duplicates,
+    readyFrom: (priority) => readyFrom({ ...item, priority }, store.settings()),
     onKeepBoth: () => {
       const ids = [...new Set([...(item.not_duplicate_of || []), ...duplicates.map((x) => x.item.id)])];
       save(store.updateItem(item.id, { not_duplicate_of: ids }));
@@ -679,6 +682,10 @@ function settingsView() {
       el('div', { class: 'form' },
         moneySetting('Monthly budget (£)', cfg.monthly_budget_pence, (v) => save(store.updateSettings({ monthly_budget_pence: v })))),
       toggle('Roll unspent budget into the next month', cfg.rollover, (v) => save(store.updateSettings({ rollover: v })))),
+    el('section', { class: 'card' },
+      el('h2', {}, 'Cooling-off'),
+      toggle('Wait 7 days before an item can be marked ready', cfg.cooling_off, (v) => save(store.updateSettings({ cooling_off: v }))),
+      el('p', { class: 'note' }, 'Counts from the day the item was added. Must-haves skip the wait, and you can still mark anything bought.')),
     el('section', { class: 'card' },
       el('h2', {}, 'Priority weights'),
       el('p', { class: 'note' }, 'Higher numbers are bought sooner. An item planned within 30 days counts double, within 90 days one and a half times.'),

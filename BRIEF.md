@@ -24,7 +24,7 @@ The product is the decision ("what do we buy next, and what slips if we don't"),
 | Device | iPhone-first web app, added to the home screen. On desktop, add drag-and-drop and paste |
 | Privacy | No list data, images or plain-text secrets in the public repo, ever |
 | Maintenance | Nothing to renew or patch: the token never expires, there are no npm dependencies and no build step |
-| Build | Fable-led throughout. Phase 1 was built with Fable and completed on 13 Nov 2026. Phases 2 and 3 are also built with Fable |
+| Build | Fable-led throughout. Phase 1 was built with Fable and completed on 13 Nov 2026. Phase 2 was built with Fable and completed on 14 Nov 2026. Phase 3 is also built with Fable |
 
 ## 2. How it works
 
@@ -109,7 +109,7 @@ wantlist-data/
 | Phase | Scope |
 |---|---|
 | **1 (done)** | **Lists:** create, rename, reorder, archive, give an emoji. **Items:** add, edit, move, change status; mark as bought with the actual price paid. **Screenshot capture** with a review step. **Views:** Lists, List, All items, Planner, Bought. **Totals** by list, priority and status, with the must-haves total shown prominently. **Planner** (section 4). **Login** for 2 users. **Export.** **Home-screen install**, readable offline |
-| **2** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. ~~**Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret.~~ Replaced by a **price check on request** (section 9). **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
+| **2 (done, see section 9)** | **Add from link:** an Action fetches the page and reads the price from JSON-LD or OpenGraph data. For Amazon links, attach the CamelCamelCamel page and use Camel's own alerts rather than tracking the price ourselves. ~~**Daily price check** (Actions cron) for non-Amazon items that have a target price, with an ntfy alert sent to the `NTFY_TOPIC` secret.~~ Replaced by a **price check on request** (section 9). **iOS Shortcut** in the share sheet that sends a screenshot or URL to `inbox/`. Optional **7-day cooling-off** before an item can move to "ready". **Spend versus budget** history. **Duplicate detection** |
 | **3** | Alternatives within one item (option A/B/C). Gift lists by person and date. Capture via WhatsApp through the home box. More users |
 
 ## 4. Prioritisation and planner
@@ -223,7 +223,7 @@ Phase 1 is built and in use. Where this section differs from the sections above,
 | "Include ideas" | A per-device switch on the Planner screen, not saved to `settings.json` |
 | Export | Includes images, embedded in the JSON file. Never includes the token |
 | Service worker | Network first, so a new deploy shows on the next online load; the saved copy is used only offline |
-| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); `js/duplicates.js`, `tools/duplicates-test.mjs` and `tools/history-test.mjs`; in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
+| Files outside the original layout | `tools/planner-test.mjs` (hand-checked planner example); `js/duplicates.js`, `tools/duplicates-test.mjs`, `tools/history-test.mjs` and `tools/cooling-test.mjs`; in `wantlist-data`, `.github/scripts/read-screenshot.mjs`, `.github/scripts/link.mjs`, `.github/scripts/list-names.mjs`, `.github/workflows/list-names.yml`, `shortcut/lists.txt` and `prompts/extract-link.txt`; here, `tools/shortcut.md` |
 
 ### Phase 2: add from link (built 13 Nov 2026)
 
@@ -304,6 +304,23 @@ Replaces the brief's daily price check. The owner did not want a scheduled job u
 | Headline | Spent and budgeted so far this calendar year |
 | No budget set | The card shows spend only |
 | Test | `tools/history-test.mjs` holds a hand-checked example |
+
+### Phase 2: 7-day cooling-off (built 14 Nov 2026)
+
+| Area | Decision |
+|---|---|
+| Switch | **Settings → Cooling-off**, off by default, stored in `settings.json` as `cooling_off`. It applies to everyone |
+| The wait | 7 days from the day the item was added, on the device's clock. Added on the 14th means ready from the 21st |
+| What is blocked | Saving an item with the status "ready" during the wait. The form says when it can be |
+| Not blocked | Every other status, and "Mark bought". Chosen by the owner |
+| Must-haves | Skip the wait. Chosen by the owner. Changing an item to must-have and ready in one save is allowed |
+| Left alone | Items already ready when the switch is turned on |
+| Display | Held items show a "Ready from 21 Nov" tag on their card and a line on their sheet |
+| Planner | Unchanged |
+| Where | In the app only (`readyFrom` in `js/planner.js`); an edit made straight in the data repo is not checked |
+| Test | `tools/cooling-test.mjs` |
+
+Phase 2 is complete as of 14 Nov 2026. Against the original list: add from link, the iOS Shortcut, cooling-off, spend versus budget history and duplicate detection are built; the daily price check and its ntfy alert were replaced by a price check on request.
 
 ### How the work is done
 

@@ -63,6 +63,7 @@ Once opened online, the app also opens with no connection and shows the last syn
 | Add by typing | **+ Add → Type it in**. Name, price and list are required |
 | Plan | **Planner**: set a monthly budget. Items are bought in score order (priority weight × urgency), month by month |
 | See what was spent | **Bought** shows spend against budget month by month: "£400 of £300, £100 over". With rollover on, unspent budget is carried into the next month and an overspend comes off it |
+| Slow down impulse buys | **Settings → Cooling-off**. When on, an item can't be marked "ready" until 7 days after it was added. Must-haves skip the wait, and you can still mark anything bought |
 | Change weights or budget | **Settings** |
 | Back up | **Settings → Export everything** downloads all lists, items, settings and images as one JSON file |
 
@@ -105,6 +106,7 @@ users.json                encrypted per-user entries
 tools/add-user.html       makes a users.json entry
 tools/shortcut.md         how to build the iOS share-sheet Shortcut
 tools/planner-test.mjs    hand-checked planner example: node tools/planner-test.mjs
+tools/cooling-test.mjs    cooling-off rule checks: node tools/cooling-test.mjs
 tools/history-test.mjs    hand-checked spend-history example: node tools/history-test.mjs
 tools/duplicates-test.mjs hand-picked duplicate examples: node tools/duplicates-test.mjs
 .github/workflows/pages.yml

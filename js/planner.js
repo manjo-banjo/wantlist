@@ -216,3 +216,22 @@ export function spendHistory(items, settings, today = todayString()) {
   }
   return rows.reverse();
 }
+
+// ---- cooling-off ----
+
+export const COOLING_DAYS = 7;
+
+// The first day an item may be marked "ready" ('YYYY-MM-DD'), or null if nothing holds it back.
+// The wait runs for 7 days from the day the item was added, on the device's clock. It applies only
+// when the setting is on, and never to must-haves or to items that are already ready, bought or dropped.
+// item may be a draft with no created_at (it counts as added today).
+export function readyFrom(item, settings, today = todayString()) {
+  if (!settings || !settings.cooling_off) return null;
+  if (item.priority === 'must') return null;
+  if (item.status === 'ready' || item.status === 'bought' || item.status === 'dropped') return null;
+  const added = item.created_at ? todayString(new Date(item.created_at)) : today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(added)) return null;
+  const d = new Date(+added.slice(0, 4), +added.slice(5, 7) - 1, +added.slice(8, 10) + COOLING_DAYS);
+  const from = todayString(d);
+  return from > today ? from : null;
+}
