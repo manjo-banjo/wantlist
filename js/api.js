@@ -527,7 +527,7 @@ export function createStore({ token, user, onChange }) {
         bought_at: null, bought_price_pence: null,
         image: null, source: 'manual', ai_confidence: null,
         added_by: user, created_at: now, updated_at: now,
-        target_price_pence: null,
+        target_price_pence: null, not_duplicate_of: [],
         ...fields,
       };
       return commit(itemPath(item.id), (cur) => cur || item, `add "${item.name}"`);

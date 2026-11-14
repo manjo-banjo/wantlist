@@ -2,10 +2,10 @@
 // Network first, so a new deploy shows up on the next online load; the copy is only used offline.
 // List data and images are cached separately by the app (IndexedDB); GitHub API calls are not touched.
 
-const CACHE = 'wantlist-shell-v1';
+const CACHE = 'wantlist-shell-v2';
 const SHELL = [
   './', 'index.html', 'app.js', 'styles.css', 'manifest.json', 'users.json',
-  'js/api.js', 'js/capture.js', 'js/crypto.js', 'js/planner.js', 'js/ui.js',
+  'js/api.js', 'js/capture.js', 'js/crypto.js', 'js/duplicates.js', 'js/planner.js', 'js/ui.js',
   'icons/icon-192.png', 'icons/apple-touch-icon.png',
 ];
 

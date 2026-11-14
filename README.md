@@ -58,6 +58,7 @@ Once opened online, the app also opens with no connection and shows the last syn
 | Add from a link | **+ Add → Paste a link**. Paste a product link or an Amazon share link, type the price if you can see it, and pick a list. A card shows "Reading link…" and fills in within about a minute. No picture is kept; the item gets an emoji instead |
 | Check a price | Open an item that has a link and tap **Check price**, or tap **Check N prices** at the top of a list. Results arrive in a minute or two as tags: "↓ £6", "↑ £6" or "Price not found". A changed price is applied straight away and the old one is kept as the was-price |
 | Watch for a target | Set a **Target price** on the item. After a check, an item at or below it shows "Target reached" |
+| Deal with a duplicate | Items that look the same as another wanted item (same link, or same or similar name) carry a **Duplicate?** tag. Open one: **Keep both** clears the tag for that pair, **Drop this one** sets it to dropped |
 | Check what was read | Items read from a screenshot or a link carry a **Review** tag. Fields the model was unsure about are highlighted; saving clears the tag |
 | Add by typing | **+ Add → Type it in**. Name, price and list are required |
 | Plan | **Planner**: set a monthly budget. Items are bought in score order (priority weight × urgency), month by month |
@@ -96,12 +97,14 @@ index.html  app.js  styles.css  manifest.json  sw.js  icons/
 js/  api.js      GitHub reads and writes, cache, the data store
      crypto.js   passphrase unlock and the saved session
      planner.js  score, planner and totals (pure functions)
+     duplicates.js  the duplicate rule (pure functions)
      capture.js  drag and drop, paste, photo picker, image compression
      ui.js       formatting and shared screen pieces
 users.json                encrypted per-user entries
 tools/add-user.html       makes a users.json entry
 tools/shortcut.md         how to build the iOS share-sheet Shortcut
 tools/planner-test.mjs    hand-checked planner example: node tools/planner-test.mjs
+tools/duplicates-test.mjs hand-picked duplicate examples: node tools/duplicates-test.mjs
 .github/workflows/pages.yml
 ```
 

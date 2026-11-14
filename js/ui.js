@@ -179,7 +179,7 @@ export function waitingCard(w, { list, showList, onRetry, onDiscard }) {
       : w.state !== 'slow' && el('span', { class: 'spinner', 'aria-hidden': 'true' }));
 }
 
-export function itemCard(item, { list, showList, onOpen, images, checking }) {
+export function itemCard(item, { list, showList, onOpen, images, checking, duplicate }) {
   const check = checking ? ['Checking price…', 'tag checking'] : checkTag(item);
   const meta = [item.brand, item.retailer, item.variant].filter(Boolean).join(' · ');
   const bought = item.status === 'bought';
@@ -191,6 +191,7 @@ export function itemCard(item, { list, showList, onOpen, images, checking }) {
       meta && el('span', { class: 'item-meta' }, meta),
       el('span', { class: 'tags' },
         needsReview(item) && el('span', { class: 'tag review' }, 'Review'),
+        duplicate && el('span', { class: 'tag review' }, 'Duplicate?'),
         check && el('span', { class: check[1] }, check[0]),
         atTarget(item) && el('span', { class: 'tag price-down' }, 'Target reached'),
         showList && list && el('span', { class: 'tag' }, list.name),
@@ -211,6 +212,13 @@ function select(name, options, value) {
   return el('select', { name }, options.map(([v, text]) => el('option', { value: v, selected: v === value }, text)));
 }
 
+// "“Coffee table” in Living room (£300)" for one or more look-alikes.
+export function describeDuplicates(found) {
+  const one = ({ item, list }) => `“${item.name}”${list ? ` in ${list.name}` : ''}${item.price_pence != null ? ` (${fmt(item.price_pence)})` : ''}`;
+  const shown = found.slice(0, 2).map(one).join(' and ');
+  return found.length > 2 ? `${shown} and ${found.length - 2} more` : shown;
+}
+
 // One sentence about the last price check, for the foot of the item sheet.
 function checkLine(item) {
   const c = item.last_check;
@@ -226,7 +234,11 @@ function checkLine(item) {
 //   item: existing item or null. onSave(values) gets every field; onBought(pence) marks it bought.
 //   images: see thumb(). Fields the model was unsure about are highlighted until the item is saved.
 //   onCheck() asks for a price check; `checking` is true while one is under way.
-export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, onCheck, checking, images }) {
+//   duplicates: [{ item, list }] other wanted items that look like this one, with onKeepBoth() and onDrop().
+//   findDuplicates(values): for a new item, returns the same shape; the person is warned once before it is added.
+export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, onCheck, checking, images,
+  duplicates, onKeepBoth, onDrop, findDuplicates }) {
+  let warnedAbout = null;
   const review = item && needsReview(item);
   // Maps a form field to the model's confidence key.
   const unsure = (key) => review && !((item.ai_confidence[key] || 0) >= REVIEW_BELOW);
@@ -277,9 +289,24 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
         : values.url && !/^https?:\/\//i.test(values.url) ? 'The link must start with http:// or https://.'
         : null;
       error.textContent = problem || '';
-      if (!problem) onSave(values);
+      if (problem) return;
+      if (!item && findDuplicates) {
+        const found = findDuplicates(values);
+        const key = found.map((d) => d.item.id).join(',');
+        if (found.length && key !== warnedAbout) {
+          warnedAbout = key;
+          error.textContent = `This looks like ${describeDuplicates(found)}. Tap Add item again to add it anyway.`;
+          return;
+        }
+      }
+      onSave(values);
     },
   },
+    duplicates && duplicates.length > 0 && el('div', { class: 'wide duplicate-note' },
+      el('p', {}, `This looks like ${describeDuplicates(duplicates)}.`),
+      el('div', { class: 'actions' },
+        el('button', { type: 'button', onclick: onKeepBoth }, 'Keep both'),
+        el('button', { type: 'button', class: 'danger', onclick: onDrop }, 'Drop this one'))),
     review && el('p', { class: 'note wide review-note' },
       item.source === 'link'
         ? 'Read from your link. Check the highlighted fields, then save.'
@@ -358,7 +385,8 @@ export function addChooser({ onScreenshot, onLink, onManual }) {
 }
 
 // Paste-a-link form. onSave({ url, list_id, price_pence }) - the price is optional.
-export function linkForm({ lists, listId, onSave }) {
+export function linkForm({ lists, listId, onSave, findDuplicates }) {
+  let warnedAbout = null;
   const url = el('input', { name: 'url', type: 'url', inputmode: 'url', placeholder: 'https://', required: true, autocomplete: 'off', autocapitalize: 'off', enterkeyhint: 'done' });
   const price = el('input', { name: 'price', inputmode: 'decimal', placeholder: 'Optional', autocomplete: 'off' });
   const error = el('p', { class: 'status error', role: 'alert' });
@@ -380,7 +408,14 @@ export function linkForm({ lists, listId, onSave }) {
         : Number.isNaN(pence) ? 'The price isn’t a number.'
         : !listSel.value ? 'Choose a list.' : null;
       error.textContent = problem || '';
-      if (!problem) onSave({ url: found[0], list_id: listSel.value, price_pence: pence });
+      if (problem) return;
+      const same = findDuplicates ? findDuplicates(found[0]) : [];
+      if (same.length && warnedAbout !== found[0]) {
+        warnedAbout = found[0];
+        error.textContent = `You already have this link: ${describeDuplicates(same)}. Tap Add link again to add it anyway.`;
+        return;
+      }
+      onSave({ url: found[0], list_id: listSel.value, price_pence: pence });
     },
   },
     field('Link', el('div', { class: 'with-button' }, url, paste), { wide: true }),
