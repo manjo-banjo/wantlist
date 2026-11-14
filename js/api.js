@@ -128,6 +128,7 @@ export const DEFAULT_SETTINGS = {
   currency: 'GBP',
   weights: { must: 3, should: 2, nice: 1 },
   rollover: true,
+  cooling_off: false, // when on, an item cannot be marked "ready" until 7 days after it was added (must-haves excepted)
   top_up: null, // { month: 'YYYY-MM', pence } - a one-off extra that applies to that month only
   budgets: {},  // 'YYYY-MM' -> { budget_pence, top_up_pence }: the budget as it stood in that month, for the spend history
 };

@@ -50,6 +50,11 @@ export function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// '2026-11-21' -> "21 Nov".
+export function fmtDay(date) {
+  return new Date(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 // Plan dates are month-level. They are stored in needed_by as the last day of the month.
 export function fmtMonth(dateOrKey) {
   if (!dateOrKey) return '';
@@ -179,7 +184,7 @@ export function waitingCard(w, { list, showList, onRetry, onDiscard }) {
       : w.state !== 'slow' && el('span', { class: 'spinner', 'aria-hidden': 'true' }));
 }
 
-export function itemCard(item, { list, showList, onOpen, images, checking, duplicate }) {
+export function itemCard(item, { list, showList, onOpen, images, checking, duplicate, readyFrom }) {
   const check = checking ? ['Checking price…', 'tag checking'] : checkTag(item);
   const meta = [item.brand, item.retailer, item.variant].filter(Boolean).join(' · ');
   const bought = item.status === 'bought';
@@ -197,7 +202,8 @@ export function itemCard(item, { list, showList, onOpen, images, checking, dupli
         showList && list && el('span', { class: 'tag' }, list.name),
         !bought && el('span', { class: 'tag p-' + item.priority }, label(item.priority)),
         el('span', { class: 'tag' }, bought ? 'Bought ' + fmtDate(item.bought_at) : label(item.status)),
-        !bought && item.needed_by && el('span', { class: 'tag' }, fmtMonth(item.needed_by)))),
+        !bought && item.needed_by && el('span', { class: 'tag' }, fmtMonth(item.needed_by)),
+        readyFrom && el('span', { class: 'tag' }, `Ready from ${fmtDay(readyFrom)}`))),
     el('span', { class: 'item-price' },
       el('span', {}, item.price_pence == null && !bought ? '–' : fmt(price)),
       !bought && item.qty > 1 && el('span', { class: 'item-meta' }, `${item.qty} × ${fmt(item.price_pence)}`)));
@@ -236,8 +242,9 @@ function checkLine(item) {
 //   onCheck() asks for a price check; `checking` is true while one is under way.
 //   duplicates: [{ item, list }] other wanted items that look like this one, with onKeepBoth() and onDrop().
 //   findDuplicates(values): for a new item, returns the same shape; the person is warned once before it is added.
+//   readyFrom(priority): the first day this item may be marked "ready" ('YYYY-MM-DD'), or null if it may be now.
 export function itemForm({ item, lists, listId, priorities, statuses, onSave, onBought, onCheck, checking, images,
-  duplicates, onKeepBoth, onDrop, findDuplicates }) {
+  duplicates, onKeepBoth, onDrop, findDuplicates, readyFrom }) {
   let warnedAbout = null;
   const review = item && needsReview(item);
   // Maps a form field to the model's confidence key.
@@ -287,6 +294,8 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
           ? 'One of the prices isn’t a number.'
         : !values.list_id ? 'Choose a list.'
         : values.url && !/^https?:\/\//i.test(values.url) ? 'The link must start with http:// or https://.'
+        : values.status === 'ready' && readyFrom && readyFrom(values.priority)
+          ? `Cooling off: this can be marked ready from ${fmtDay(readyFrom(values.priority))}. Must-haves skip the wait.`
         : null;
       error.textContent = problem || '';
       if (problem) return;
@@ -307,6 +316,8 @@ export function itemForm({ item, lists, listId, priorities, statuses, onSave, on
       el('div', { class: 'actions' },
         el('button', { type: 'button', onclick: onKeepBoth }, 'Keep both'),
         el('button', { type: 'button', class: 'danger', onclick: onDrop }, 'Drop this one'))),
+    readyFrom && readyFrom(it.priority) && el('p', { class: 'note wide' },
+      `Cooling off: ready from ${fmtDay(readyFrom(it.priority))}.`),
     review && el('p', { class: 'note wide review-note' },
       item.source === 'link'
         ? 'Read from your link. Check the highlighted fields, then save.'
